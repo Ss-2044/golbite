@@ -164,9 +164,10 @@ const A = {
     const d = setupDraft();
     const status = document.getElementById('loc-status');
     if (status) status.innerHTML = `<div class="notice info mt-s">${spinner()}<span>${T('Requesting location…', 'جارٍ طلب الموقع…')}</span></div>`;
-    const fail = () => { d.locationMode = 'denied'; rerender(); };
-    if (!navigator.geolocation) return fail();
-    navigator.geolocation.getCurrentPosition(() => { d.locationMode = 'gps'; d.gate = 'G1'; if (!d.section) d.section = 'A'; rerender(); }, fail, { timeout: 7000 });
+    getLocation().then((ok) => {
+      if (ok) { d.locationMode = 'gps'; d.gate = 'G1'; if (!d.section) d.section = 'A'; } else d.locationMode = 'denied';
+      rerender();
+    });
   },
 
   // companion & map
@@ -209,6 +210,7 @@ const A = {
     const { id, opt } = pkey(key);
     if (S.soldOut.includes(id)) return;
     S.cart.items[key] = (S.cart.items[key] || 0) + 1;
+    haptic('light');
     const fromSheetCta = el?.classList?.contains('sheet-add');
     if (fromSheetCta) closeSheetSilently();
     commit();
@@ -244,6 +246,7 @@ const A = {
       const fee = S.cart.type === 'delivery' ? 5 : 0;
       const o = placeOrder({ items, type: S.cart.type, dest: S.cart.dest, schedule: S.cart.schedule, note: (S.cart.note || '').trim() });
       o.total += fee;
+      scheduleReadyAlert(o); haptic('success');
       S.cart = { type: S.cart.type, items: {}, dest: S.cart.dest, schedule: 'now', combo: 0, note: '' };
       save(); go('track/' + o.id);
       celebrate({ emoji: '✅', title: T('Order confirmed!', 'تم تأكيد الطلب!'), sub: T(`${o.id} · routed to ${o.tasks.length} kitchen(s)`, `${o.id} · موزّع على ${o.tasks.length} مطبخ`), kind: 'confetti', ms: 2200 });
@@ -305,6 +308,7 @@ const A = {
     const g = S.group;
     const o = placeOrder({ items: g.items.map((i) => ({ ...i })), type: g.type, dest: g.dest, group: g.code });
     S.group = null; closeSheetSilently(); save(); go('track/' + o.id);
+    scheduleReadyAlert(o); haptic('success');
     celebrate({ emoji: '👥', title: T('Group order placed!', 'تم تنفيذ الطلب الجماعي!'), sub: T('One handoff for the whole group.', 'تسليم واحد للمجموعة كاملة.'), ms: 2500 });
   },
   groupLeave: () => confirmSheet({ title: T('Leave this group?', 'مغادرة المجموعة؟'), body: T('Items you added will be removed.', 'ستُزال الأصناف التي أضفتها.'), ok: T('Leave', 'مغادرة'), danger: true, onOk: () => { S.group = null; commit(); } }),
@@ -627,6 +631,7 @@ window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change
 /* ---------- boot ---------- */
 function boot() {
   const splash = document.getElementById('splash');
+  nativeInit();
   rerender();
   startSim();
   setTimeout(() => { splash.classList.add('out'); setTimeout(() => splash.remove(), 500); }, motionReduced() ? 300 : 1500);
