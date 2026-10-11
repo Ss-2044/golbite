@@ -287,6 +287,7 @@ function onOrderStatus(o) {
     T(`Order ${o.id} completed. Enjoy!`, `اكتمل طلبك ${o.id}. بالعافية!`),
   ];
   if (msgs[o.status]) toast(msgs[o.status], o.status === 3 ? 'success' : 'info');
+  nativeOrderStatus(o);
 }
 
 /* ---------- match & crowd simulation ---------- */
@@ -428,6 +429,8 @@ function trigger(kind, arg) {
         toast(T(`🍀 Lucky Goal Minute! Seat ${seatLabel()} wins 150 points.`, `🍀 دقيقة الهدف المحظوظة! المقعد ${seatLabel()} يفوز بـ 150 نقطة.`), 'success', 5000);
       }, 4800);
       addPoints(25, T('Goal witness', 'شاهد الهدف'));
+      haptic('heavy');
+      nativeNotify(concert ? T('Hit song drop!', 'أغنية الحفل!') : T('GOAL!', 'هدف!'), T('Goal-time offers are live in GolBite.', 'عروض الهدف متاحة الآن في GolBite.'), 'goal:' + m.minute);
       break;
     }
     case 'halftime':

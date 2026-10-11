@@ -1,0 +1,22 @@
+{
+  "appId": "sa.golbite.app",
+  "appName": "GolBite",
+  "webDir": "www",
+  "backgroundColor": "#0F405E",
+  "ios": {
+    "contentInset": "never",
+    "scheme": "GolBite",
+    "backgroundColor": "#0F405E"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": true,
+      "backgroundColor": "#FFFFFF",
+      "showSpinner": false
+    },
+    "LocalNotifications": {
+      "iconColor": "#F0862A"
+    }
+  }
+}

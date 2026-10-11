@@ -45,6 +45,10 @@ Product imagery uses an illustrated tile treatment; real photos can be mapped in
   pickup overload, sold-out item, event reset, and the presenter **Product Tour**.
 - Progress is saved in `localStorage`. Use *Profile → Settings → Reset* to clear it.
 
+## iOS app
+
+The iOS project lives in `ios/` (Capacitor 8, Swift Package Manager). Setup, TestFlight and App Store steps are in [IOS.md](IOS.md) (Arabic).
+
 ## Turning it into a store app later
 
 The code is plain HTML/CSS/JS with no build step, so it can be wrapped as-is with
