@@ -4,11 +4,11 @@ function tierBar() {
   const t = tierOf(S.points);
   const tier = TIERS[t];
   const pct = tier.next ? ((S.points - tier.min) / (tier.next - tier.min)) * 100 : 100;
-  return `<div class="tier">
+  return `<div class="tier row gap">${sunProgress(pct, 52)}<div class="grow">
     <div class="row between"><b style="color:${tier.color}">${icon('star')} ${L(tier.name)}</b><small class="muted">${tier.next ? `${tier.next - S.points} ${T('pts to', 'نقطة حتى')} ${L(TIERS[t === 'bronze' ? 'silver' : 'gold'].name)}` : T('Top tier reached', 'وصلت لأعلى فئة')}</small></div>
     <div class="tier-track"><i style="width:${clamp(pct, 2, 100)}%"></i></div>
     <div class="tier-steps">${['bronze', 'silver', 'gold'].map((k) => `<span class="${S.points >= TIERS[k].min ? 'on' : ''}">${L(TIERS[k].name)}</span>`).join('')}</div>
-  </div>`;
+  </div></div>`;
 }
 
 let MINI = { taps: 0, until: 0, done: false };

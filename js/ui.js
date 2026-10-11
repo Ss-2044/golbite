@@ -44,6 +44,15 @@ const ICONS = {
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
   wheel: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7M12 14v7M3 12h7M14 12h7"/>',
   logout: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  filter: '<path d="M4 5h16l-6 8v5l-4 2v-7z"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  note: '<path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4M8 12h8M8 16h5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/>',
+  swap: '<path d="M7 7h12l-3-3M17 17H5l3 3"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  live: '<circle cx="12" cy="12" r="3"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9M16.5 7.5a6.4 6.4 0 0 1 0 9M4.6 4.6a10.5 10.5 0 0 0 0 14.8M19.4 4.6a10.5 10.5 0 0 1 0 14.8"/>',
+  plusCircle: '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
 };
 
 function icon(name, cls = '') {
@@ -60,6 +69,26 @@ function sunMark(size = 48, cls = '') {
     rays += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" style="--i:${i}"/>`;
   }
   return `<svg class="sun ${cls}" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true"><g stroke="currentColor" stroke-width="2.6" stroke-linecap="round">${rays}</g></svg>`;
+}
+
+/* Sunburst as a progress device: `pct` of the 24 rays are lit. */
+function sunProgress(pct, size = 44, cls = '') {
+  let rays = '';
+  const lit = Math.round((clamp(pct, 0, 100) / 100) * 24);
+  for (let i = 0; i < 24; i++) {
+    const a = (i / 24) * Math.PI * 2 - Math.PI / 2;
+    const x1 = 24 + Math.cos(a) * 13, y1 = 24 + Math.sin(a) * 13, x2 = 24 + Math.cos(a) * 21, y2 = 24 + Math.sin(a) * 21;
+    rays += `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" class="${i < lit ? 'on' : ''}"/>`;
+  }
+  return `<svg class="sunp ${cls}" width="${size}" height="${size}" viewBox="0 0 48 48" aria-hidden="true"><g stroke-width="3" stroke-linecap="round">${rays}</g></svg>`;
+}
+function spinner() { return sunMark(18, 'spin'); }
+
+/* Product imagery: real photo when one is mapped in PHOTOS, otherwise the illustrated tile. */
+function media(m, cls = '') {
+  if (!m) return '';
+  if (PHOTOS[m.id]) return `<span class="media ${cls}"><img src="${PHOTOS[m.id]}" alt="" loading="lazy"/></span>`;
+  return `<span class="media ${cls}" style="--tint:${CAT_TINT[m.cat] || '#EEF2F6'}" aria-hidden="true"><i>${m.emoji}</i></span>`;
 }
 
 /* ---------- live regions: small DOM fragments refreshed on each simulation tick ---------- */
@@ -140,15 +169,15 @@ function celebrate({ title, sub, emoji = '🎉', kind = 'confetti', ms = 3800, c
   const root = document.getElementById('celebrate-root');
   clearTimeout(celebTimer);
   root.hidden = false;
+  // A compact banner at the top: celebrates without covering ordering or tracking.
   root.innerHTML = `<canvas id="fx"></canvas>
     <div class="celeb-card" role="status" aria-live="assertive">
-      <div class="celeb-emoji">${emoji}</div>
-      <h2>${title}</h2>
-      ${sub ? `<p>${sub}</p>` : ''}
-      <div class="row gap center mt-s">
-        ${cta ? `<button class="btn btn-primary btn-sm" data-act="${cta.act}" data-arg="${cta.arg || ''}">${cta.label}</button>` : ''}
-        <button class="btn btn-ghost-light btn-sm" data-act="dismissCelebrate">${T('Dismiss', 'إغلاق')}</button>
-      </div>
+      <div class="celeb-mark">${sunMark(56, 'burst')}<span class="celeb-emoji">${emoji}</span></div>
+      <div class="celeb-text"><b>${title}</b>${sub ? `<p>${sub}</p>` : ''}
+        <div class="row gap mt-xs">
+          ${cta ? `<button class="btn btn-orange btn-sm" data-act="${cta.act}" data-arg="${cta.arg || ''}">${cta.label}</button>` : ''}
+          <button class="btn btn-ghost-light btn-sm" data-act="dismissCelebrate">${T('Dismiss', 'إغلاق')}</button>
+        </div></div>
     </div>`;
   if (!motionReduced()) runFx(root.querySelector('#fx'), kind);
   celebTimer = setTimeout(dismissCelebrate, ms);
@@ -203,29 +232,50 @@ function runFx(canvas, kind) {
 
 /* ---------- artwork: illustrated stadium hero (no external images needed) ---------- */
 function stadiumArt(variant = 'night') {
-  const team = myTeam().color;
+  const ev = currentEvent();
+  const home = TEAMS[ev.home].color, away = ev.away ? TEAMS[ev.away].color : '#F0862A';
   const concert = isConcert();
-  const sky = variant === 'day' ? ['#2B6C93', '#0F405E'] : ['#0A2A3F', '#0F405E'];
+  // deterministic pseudo-random so the crowd doesn't jump between renders
+  let seed = 7; const rnd = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280);
   let crowd = '';
-  for (let i = 0; i < 70; i++) {
-    const x = (i * 23) % 800, y = 150 + ((i * 37) % 40);
-    crowd += `<circle cx="${x}" cy="${y}" r="${2 + (i % 3)}" fill="${i % 5 === 0 ? team : i % 7 === 0 ? '#F0862A' : '#1D5A80'}" opacity=".8"/>`;
+  for (let row = 0; row < 9; row++) {
+    const y = 150 + row * 13, n = 46 + row * 4;
+    for (let i = 0; i < n; i++) {
+      const x = (i / n) * 860 - 30 + rnd() * 10;
+      const side = x < 400 ? home : away;
+      const c = rnd() < 0.42 ? side : rnd() < 0.08 ? '#FFE8B0' : '#173F5C';
+      crowd += `<circle cx="${x.toFixed(1)}" cy="${(y + rnd() * 4).toFixed(1)}" r="${(2.4 + row * 0.25).toFixed(1)}" fill="${c}" opacity="${(0.55 + rnd() * 0.4).toFixed(2)}"/>`;
+    }
   }
-  const light = (x) => `<g><rect x="${x - 2}" y="20" width="4" height="120" fill="#123A55"/><rect x="${x - 22}" y="10" width="44" height="16" rx="3" fill="#E9F2F7"/>
-    <polygon points="${x - 22},26 ${x + 22},26 ${x + 160},260 ${x - 160},260" fill="url(#beam)" opacity=".35"/></g>`;
-  const stage = concert
-    ? `<rect x="300" y="190" width="200" height="40" rx="4" fill="#0A2233"/><rect x="330" y="160" width="140" height="34" rx="4" fill="${team}" opacity=".85"/>
-       <polygon points="400,160 300,40 500,40" fill="${team}" opacity=".12"/>`
-    : `<ellipse cx="400" cy="240" rx="330" ry="46" fill="#167A4C"/><ellipse cx="400" cy="240" rx="330" ry="46" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="2"/>
-       <line x1="400" y1="194" x2="400" y2="286" stroke="#fff" stroke-opacity=".5" stroke-width="2"/><ellipse cx="400" cy="240" rx="50" ry="12" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="2"/>`;
-  return `<svg class="hero-art" viewBox="0 0 800 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-    <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${sky[0]}"/><stop offset="1" stop-color="${sky[1]}"/></linearGradient>
-    <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF6D8"/><stop offset="1" stop-color="#FFF6D8" stop-opacity="0"/></linearGradient></defs>
-    <rect width="800" height="300" fill="url(#sky)"/>
-    ${light(120)}${light(680)}
-    <path d="M0 140 Q400 95 800 140 V300 H0z" fill="#0B3049"/>
-    ${crowd}
-    ${stage}
+  let sparks = '';
+  for (let i = 0; i < 26; i++) sparks += `<circle class="spark" style="--d:${(rnd() * 3).toFixed(2)}s" cx="${(rnd() * 800).toFixed(0)}" cy="${(150 + rnd() * 110).toFixed(0)}" r="1.6" fill="#FFF4D6"/>`;
+  const light = (x, flip) => `<g><rect x="${x - 2}" y="34" width="4" height="96" fill="#0D2F46"/>
+    <g transform="translate(${x} 30)">${[0, 1, 2].map((r) => [0, 1, 2, 3].map((c) => `<rect x="${-20 + c * 10}" y="${-12 + r * 7}" width="8" height="5" rx="1" fill="#F4FAFF"/>`).join('')).join('')}</g>
+    <circle cx="${x}" cy="26" r="70" fill="url(#glow)"/>
+    <polygon points="${x - 22},36 ${x + 22},36 ${x + (flip ? -60 : 260)},330 ${x + (flip ? -300 : 20)},330" fill="url(#beam)" opacity=".28"/></g>`;
+  const field = concert
+    ? `<polygon points="250,300 550,300 600,420 200,420" fill="#0A2233"/><rect x="300" y="268" width="200" height="34" rx="4" fill="${home}" opacity=".9"/>
+       <polygon points="400,268 280,60 520,60" fill="${home}" opacity=".14"/><polygon points="400,268 180,90 260,80" fill="#F0862A" opacity=".1"/>`
+    : `<polygon points="120,282 680,282 800,420 0,420" fill="#147A49"/>
+       ${[0, 1, 2, 3, 4, 5].map((i) => `<polygon points="${120 + i * 93},282 ${213 + i * 93},282 ${(i + 1) * 133},420 ${i * 133},420" fill="#1A8C55" opacity="${i % 2 ? 0 : 0.55}"/>`).join('')}
+       <polygon points="120,282 680,282 800,420 0,420" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+       <line x1="400" y1="282" x2="400" y2="420" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>
+       <ellipse cx="400" cy="340" rx="74" ry="22" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="2"/>`;
+  return `<svg class="hero-art" viewBox="0 0 800 420" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#061B2A"/><stop offset=".7" stop-color="#0C3550"/><stop offset="1" stop-color="#0F405E"/></linearGradient>
+      <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF6D8"/><stop offset="1" stop-color="#FFF6D8" stop-opacity="0"/></linearGradient>
+      <radialGradient id="glow"><stop offset="0" stop-color="#FFF7E0" stop-opacity=".55"/><stop offset="1" stop-color="#FFF7E0" stop-opacity="0"/></radialGradient>
+      <linearGradient id="haze" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0F405E" stop-opacity="0"/><stop offset="1" stop-color="#9CC3DD" stop-opacity=".18"/></linearGradient>
+    </defs>
+    <rect width="800" height="420" fill="url(#sky)"/>
+    <path d="M-20 150 Q400 112 820 150 V290 H-20z" fill="#0A2C43"/>
+    <path d="M-20 136 Q400 100 820 136 V150 Q400 114 -20 150z" fill="#123E5C"/>
+    <rect x="70" y="128" width="150" height="14" rx="2" fill="${home}" opacity=".85"/><rect x="580" y="128" width="150" height="14" rx="2" fill="${away}" opacity=".85"/>
+    ${crowd}${sparks}
+    <rect x="0" y="120" width="800" height="170" fill="url(#haze)"/>
+    ${light(90, false)}${light(710, true)}
+    ${field}
   </svg>`;
 }
 

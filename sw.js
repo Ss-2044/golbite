@@ -1,5 +1,5 @@
 /* GolBite — offline cache so the demo keeps working without a connection. */
-const CACHE = 'golbite-v1';
+const CACHE = 'golbite-v2';
 const FILES = ['./', 'index.html', 'css/app.css', 'manifest.webmanifest', 'assets/logo.png', 'assets/logo-light.png', 'assets/icon-192.png',
   'js/data.js', 'js/store.js', 'js/ui.js', 'js/engine.js', 'js/map.js', 'js/views/fan.js', 'js/views/ordering.js', 'js/views/play.js',
   'js/views/shop.js', 'js/views/profile.js', 'js/views/ops.js', 'js/views/partner.js', 'js/app.js'];

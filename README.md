@@ -9,6 +9,22 @@ It runs fully in the browser with simulated demo data. No real login, payment, m
 - **As an installable app (PWA, offline):** serve the folder over HTTP, for example
   `python3 -m http.server 8080` then open <http://localhost:8080>. You can then "Add to Home Screen".
 
+## Roles
+
+| Role | Where | Purpose |
+| --- | --- | --- |
+| Fan (default) | `#/home`, `#/menu`, `#/orders`, `#/play`, `#/shop`, `#/profile` | Matchday Companion, ordering food and club merchandise, tracking, rewards |
+| Venue Operator | `#/ops/overview`, `orders`, `distribution`, `inventory`, `map` | Venue Control Center: queue with filters and detail panel, vendor/runner routing, stock and pickup capacity, map operations |
+| Club / Partner | `#/partner/results`, `#/partner/create` | Campaign results (one consistent dataset) and a guided offer builder with live fan preview |
+
+All three share one state: a fan order appears in the operator queue, operator status changes update the fan's tracking, and partner offers appear in the fan's Companion and feed the campaign analytics.
+
+## Design system
+
+Navy for the interface, GolBite orange for primary actions and selected states, white panels on a cool grey background.
+Tokens (type scale, spacing, radii, elevation, status colours) live at the top of `css/app.css`. The sunburst from the wordmark is reused for loading, progress (loyalty, stadium unlock), the current match moment and reward moments.
+Product imagery uses an illustrated tile treatment; real photos can be mapped in `PHOTOS` (`js/data.js`).
+
 ## What's inside
 
 | Area | Where |

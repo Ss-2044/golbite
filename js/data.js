@@ -80,6 +80,7 @@ const VENDORS = [
   { id: 'v2', name: { en: 'Golden Fries Co', ar: 'البطاطس الذهبية' }, angle: 340, cats: ['fries', 'snacks'],    emoji: '🍟' },
   { id: 'v3', name: { en: 'Oasis Drinks',   ar: 'مشروبات الواحة' }, angle: 68,  cats: ['drinks', 'snacks'],   emoji: '🥤' },
   { id: 'v4', name: { en: 'Kickoff Kiosk',  ar: 'كشك البداية' },   angle: 205, cats: ['snacks', 'drinks', 'burgers'], emoji: '🌭' },
+  { id: 'v5', name: { en: 'Club Store',     ar: 'متجر النادي' },   angle: 168, cats: ['merch'], emoji: '🛍️' },
 ];
 
 const FACILITIES = [
@@ -101,6 +102,7 @@ const MENU_CATS = [
   { id: 'burgers', name: { en: 'Burgers', ar: 'برجر' },    emoji: '🍔' },
   { id: 'fries',   name: { en: 'Fries',   ar: 'بطاطس' },   emoji: '🍟' },
   { id: 'snacks',  name: { en: 'Snacks',  ar: 'سناكات' },  emoji: '🍿' },
+  { id: 'merch',   name: { en: 'Club merchandise', ar: 'منتجات النادي' }, emoji: '🧣' },
 ];
 
 const DIETS = [
@@ -120,42 +122,42 @@ const MENU = [
   { id: 'd1', cat: 'drinks', emoji: '💧', price: 4,  prep: 1, diet: ['veg', 'gf', 'df'], allergens: [],
     name: { en: 'Still Water', ar: 'مياه معدنية' }, desc: { en: 'Chilled 500 ml bottle.', ar: 'عبوة باردة 500 مل.' },
     ing: { en: 'Mineral water', ar: 'مياه معدنية' } },
-  { id: 'd2', cat: 'drinks', emoji: '🥤', price: 8,  prep: 1, diet: ['veg', 'gf', 'df'], allergens: [],
+  { id: 'd2', opts: 'drink', cat: 'drinks', emoji: '🥤', price: 8,  prep: 1, diet: ['veg', 'gf', 'df'], allergens: [],
     name: { en: 'Cola', ar: 'كولا' }, desc: { en: 'Ice-cold fountain cola, regular size.', ar: 'كولا باردة، حجم عادي.' },
     ing: { en: 'Carbonated water, sugar, natural flavours', ar: 'مياه غازية، سكر، نكهات طبيعية' } },
   { id: 'd3', cat: 'drinks', emoji: '☕', price: 10, prep: 2, diet: ['veg', 'gf', 'df'], allergens: [],
     name: { en: 'Saudi Coffee', ar: 'قهوة سعودية' }, desc: { en: 'Light-roast qahwa with cardamom and saffron.', ar: 'قهوة شقراء بالهيل والزعفران.' },
     ing: { en: 'Coffee, cardamom, saffron, cloves', ar: 'بن، هيل، زعفران، قرنفل' } },
-  { id: 'd4', cat: 'drinks', emoji: '🍋', price: 14, prep: 2, diet: ['veg', 'gf', 'df'], allergens: [],
+  { id: 'd4', opts: 'drink', cat: 'drinks', emoji: '🍋', price: 14, prep: 2, diet: ['veg', 'gf', 'df'], allergens: [],
     name: { en: 'Mint Lemonade', ar: 'ليمون بالنعناع' }, desc: { en: 'Fresh lemon blended with mint and ice.', ar: 'ليمون طازج مع نعناع وثلج.' },
     ing: { en: 'Lemon, mint, sugar, ice', ar: 'ليمون، نعناع، سكر، ثلج' } },
   { id: 'd5', cat: 'drinks', emoji: '🫖', price: 9,  prep: 2, diet: ['veg', 'gf'], allergens: ['dairy'],
     name: { en: 'Karak Tea', ar: 'شاي كرك' }, desc: { en: 'Spiced milk tea, stadium favourite.', ar: 'شاي بالحليب والبهارات، المفضل في المدرجات.' },
     ing: { en: 'Black tea, milk, cardamom, sugar', ar: 'شاي أسود، حليب، هيل، سكر' } },
   // Burgers
-  { id: 'b1', cat: 'burgers', emoji: '🍔', price: 32, prep: 6, diet: [], allergens: ['gluten', 'dairy', 'sesame'],
+  { id: 'b1', opts: 'burger', cat: 'burgers', emoji: '🍔', price: 32, prep: 6, diet: [], allergens: ['gluten', 'dairy', 'sesame'],
     name: { en: 'Classic Beef Burger', ar: 'برجر لحم كلاسيك' }, desc: { en: 'Grilled beef patty, cheddar, pickles, house sauce.', ar: 'لحم مشوي، شيدر، مخلل، صوص خاص.' },
     ing: { en: 'Beef, brioche bun, cheddar, pickles, lettuce, sauce', ar: 'لحم بقري، خبز بريوش، شيدر، مخلل، خس، صوص' } },
-  { id: 'b2', cat: 'burgers', emoji: '🍗', price: 29, prep: 6, diet: ['spicy'], allergens: ['gluten', 'egg'],
+  { id: 'b2', opts: 'burger', cat: 'burgers', emoji: '🍗', price: 29, prep: 6, diet: ['spicy'], allergens: ['gluten', 'egg'],
     name: { en: 'Crispy Chicken Burger', ar: 'برجر دجاج مقرمش' }, desc: { en: 'Crunchy chicken fillet with spicy mayo.', ar: 'صدر دجاج مقرمش مع مايونيز حار.' },
     ing: { en: 'Chicken, bun, spicy mayo, lettuce', ar: 'دجاج، خبز، مايونيز حار، خس' } },
-  { id: 'b3', cat: 'burgers', emoji: '🥩', price: 45, prep: 8, diet: [], allergens: ['gluten', 'dairy', 'sesame', 'egg'],
+  { id: 'b3', opts: 'burger', cat: 'burgers', emoji: '🥩', price: 45, prep: 8, diet: [], allergens: ['gluten', 'dairy', 'sesame', 'egg'],
     name: { en: 'Falcon Double', ar: 'دبل الصقر' }, desc: { en: 'Two smashed patties, double cheese, caramelised onion.', ar: 'قطعتا لحم، جبن مضاعف، بصل مكرمل.' },
     ing: { en: 'Beef ×2, cheddar ×2, onion, bun, sauce', ar: 'لحم ×2، شيدر ×2، بصل، خبز، صوص' } },
-  { id: 'b4', cat: 'burgers', emoji: '🥙', price: 28, prep: 5, diet: ['veg'], allergens: ['gluten', 'dairy'],
+  { id: 'b4', opts: 'burger', cat: 'burgers', emoji: '🥙', price: 28, prep: 5, diet: ['veg'], allergens: ['gluten', 'dairy'],
     name: { en: 'Halloumi Veggie Burger', ar: 'برجر حلومي نباتي' }, desc: { en: 'Grilled halloumi, roasted pepper, rocket.', ar: 'حلومي مشوي، فلفل محمص، جرجير.' },
     ing: { en: 'Halloumi, pepper, rocket, bun', ar: 'حلومي، فلفل، جرجير، خبز' } },
   // Fries
-  { id: 'f1', cat: 'fries', emoji: '🍟', price: 12, prep: 3, diet: ['veg', 'gf', 'df'], allergens: [],
+  { id: 'f1', opts: 'fries', cat: 'fries', emoji: '🍟', price: 12, prep: 3, diet: ['veg', 'gf', 'df'], allergens: [],
     name: { en: 'Classic Fries', ar: 'بطاطس كلاسيك' }, desc: { en: 'Golden, crispy, lightly salted.', ar: 'ذهبية ومقرمشة بملح خفيف.' },
     ing: { en: 'Potatoes, sunflower oil, salt', ar: 'بطاطس، زيت دوار الشمس، ملح' } },
-  { id: 'f2', cat: 'fries', emoji: '🧀', price: 18, prep: 4, diet: ['veg'], allergens: ['dairy'],
+  { id: 'f2', opts: 'fries', cat: 'fries', emoji: '🧀', price: 18, prep: 4, diet: ['veg'], allergens: ['dairy'],
     name: { en: 'Cheese Fries', ar: 'بطاطس بالجبن' }, desc: { en: 'Fries topped with warm cheese sauce.', ar: 'بطاطس مع صوص جبن ساخن.' },
     ing: { en: 'Potatoes, cheese sauce', ar: 'بطاطس، صوص جبن' } },
-  { id: 'f3', cat: 'fries', emoji: '🌶️', price: 15, prep: 3, diet: ['veg', 'gf', 'df', 'spicy'], allergens: [],
+  { id: 'f3', opts: 'fries', cat: 'fries', emoji: '🌶️', price: 15, prep: 3, diet: ['veg', 'gf', 'df', 'spicy'], allergens: [],
     name: { en: 'Spicy Fries', ar: 'بطاطس حارة' }, desc: { en: 'Seasoned with chili and paprika.', ar: 'متبلة بالشطة والبابريكا.' },
     ing: { en: 'Potatoes, chili, paprika, salt', ar: 'بطاطس، شطة، بابريكا، ملح' } },
-  { id: 'f4', cat: 'fries', emoji: '🍠', price: 17, prep: 4, diet: ['veg', 'gf', 'df'], allergens: [],
+  { id: 'f4', opts: 'fries', cat: 'fries', emoji: '🍠', price: 17, prep: 4, diet: ['veg', 'gf', 'df'], allergens: [],
     name: { en: 'Sweet Potato Fries', ar: 'بطاطا حلوة' }, desc: { en: 'Crisp sweet potato with sea salt.', ar: 'بطاطا حلوة مقرمشة بملح البحر.' },
     ing: { en: 'Sweet potato, oil, sea salt', ar: 'بطاطا حلوة، زيت، ملح بحري' } },
   // Snacks
@@ -183,7 +185,8 @@ const COMBO = {
 };
 
 /* Alternatives suggested when an item is sold out. */
-const ALTERNATIVES = { b1: 'b3', b2: 'b1', b3: 'b1', b4: 'b2', f1: 'f3', f2: 'f1', f3: 'f1', f4: 'f1', d1: 'd2', d2: 'd4', d3: 'd5', d4: 'd2', d5: 'd3', s1: 's3', s2: 's3', s3: 's2', s4: 's1', s5: 'b1' };
+const ALTERNATIVES = { b1: 'b3', b2: 'b1', b3: 'b1', b4: 'b2', f1: 'f3', f2: 'f1', f3: 'f1', f4: 'f1', d1: 'd2', d2: 'd4', d3: 'd5', d4: 'd2', d5: 'd3', s1: 's3', s2: 's3', s3: 's2', s4: 's1', s5: 'b1',
+  m1: 'm2', m2: 'm1', m3: 'm5', m4: 'm3', m5: 'm3', m6: 'm8', m7: 'm1', m8: 'm6', x77: 'm3', xgold: 'm7', xstad: 'm3', xred: 'm1', xpred: 'm4', xht: 'm5' };
 
 const MERCH = [
   { id: 'm1', emoji: '👕', price: 299, kind: 'jersey', name: { en: 'Home Jersey 26/27', ar: 'قميص الأرض 26/27' }, desc: { en: 'Breathable match fabric with embroidered crest.', ar: 'قماش مباريات بشعار مطرّز.' }, sizes: true },
@@ -261,8 +264,50 @@ const DEFAULT_OFFERS = [
 /* Moments an offer can be scheduled for. */
 const OFFER_MOMENTS = [
   { id: 'now',      name: { en: 'Right now', ar: 'الآن' } },
+  { id: 'arrival',  name: { en: 'On arrival', ar: 'عند الوصول' } },
   { id: 'prematch', name: { en: 'Pre-match', ar: 'قبل المباراة' } },
   { id: 'halftime', name: { en: 'Halftime', ar: 'الاستراحة' } },
   { id: 'goal',     name: { en: 'On a goal', ar: 'عند تسجيل هدف' } },
   { id: 'minute',   name: { en: 'Specific minute', ar: 'دقيقة محددة' } },
 ];
+
+/* Item options (single choice). `add` is the price difference in SAR. */
+const OPTION_SETS = {
+  burger: { label: { en: 'Make it your way', ar: 'اختر طريقتك' }, list: [
+    { id: 'std', name: { en: 'Regular', ar: 'عادي' }, add: 0 },
+    { id: 'cheese', name: { en: 'Extra cheese', ar: 'جبن إضافي' }, add: 4 },
+    { id: 'noonion', name: { en: 'No onion', ar: 'بدون بصل' }, add: 0 },
+  ] },
+  drink: { label: { en: 'Size', ar: 'الحجم' }, list: [
+    { id: 'reg', name: { en: 'Regular', ar: 'عادي' }, add: 0 },
+    { id: 'lg', name: { en: 'Large', ar: 'كبير' }, add: 3 },
+  ] },
+  fries: { label: { en: 'Size', ar: 'الحجم' }, list: [
+    { id: 'reg', name: { en: 'Regular', ar: 'عادي' }, add: 0 },
+    { id: 'lg', name: { en: 'Large', ar: 'كبير' }, add: 4 },
+  ] },
+  size: { label: { en: 'Size', ar: 'المقاس' }, list: ['S', 'M', 'L', 'XL'].map((z) => ({ id: z, name: { en: z, ar: z }, add: 0 })) },
+};
+
+/* Club merchandise appears in the same order flow as food (category "merch"). */
+const SHOP_CATS = [
+  { id: 'all', name: { en: 'All', ar: 'الكل' } },
+  { id: 'apparel', name: { en: 'Apparel', ar: 'ملابس' } },
+  { id: 'accessories', name: { en: 'Accessories', ar: 'إكسسوارات' } },
+  { id: 'gifts', name: { en: 'Gifts', ar: 'هدايا' } },
+  { id: 'drops', name: { en: 'Limited drops', ar: 'إصدارات محدودة' } },
+];
+const MERCH_GROUP = { jersey: 'apparel', hoodie: 'apparel', scarf: 'accessories', cap: 'accessories', flag: 'accessories', ball: 'gifts', mug: 'gifts' };
+const MERCH_ITEMS = MERCH.map((m) => ({
+  ...m, cat: 'merch', prep: 1, diet: [], allergens: [], opts: m.sizes ? 'size' : null,
+  group: m.special ? 'drops' : MERCH_GROUP[m.kind] || 'gifts',
+  ing: { en: 'Official licensed product · includes a digital twin', ar: 'منتج رسمي مرخّص · يشمل نسخة رقمية' },
+}));
+const CATALOG = [...MENU, ...MERCH_ITEMS];
+
+/* Real photography can be dropped into assets/photos and mapped here: { b1: 'assets/photos/b1.jpg' }.
+   Items without a photo use the illustrated tile treatment. */
+const PHOTOS = {};
+
+/* Background tint per category for the illustrated product treatment. */
+const CAT_TINT = { drinks: '#E6F2FB', burgers: '#FDEEE1', fries: '#FFF4D9', snacks: '#F3ECFB', merch: '#E8EEF5' };

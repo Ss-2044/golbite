@@ -120,125 +120,179 @@ function companionMoments() {
   return cards.filter((c) => !S.dismissed.includes(c.id)).slice(0, 3);
 }
 
+
 function liveOffersForFan() {
   const sec = S.setup?.section;
   return S.offers.filter((of) => offerLive(of) && of.sections.includes(sec));
 }
 
-function offerCard(of, preview = false) {
+function offerCountdown(of) {
   const total = (of.minutes || 5) * 60;
   const left = of.endsAt && of.endsAt > Date.now() ? Math.round((of.endsAt - Date.now()) / 1000) : Math.round(total - ((Date.now() / 1000) % total));
-  return `<article class="offer-card ${of.tone === 'sponsor' ? 'sponsor' : ''}">
-    <span class="offer-img" aria-hidden="true">${of.image}</span>
-    <div class="grow"><small class="offer-tag">${of.tone === 'sponsor' ? T('Sponsor moment', 'لحظة الراعي') : T('Team offer', 'عرض الفريق')} · ${esc(of.sponsor)}</small>
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+function offerCard(of, preview = false) {
+  const it = item(of.item || 'd2');
+  return `<article class="offer ${of.tone === 'sponsor' ? 'sponsor' : 'team'}">
+    <span class="offer-media" style="--tint:${CAT_TINT[it?.cat] || '#FEF1E6'}" aria-hidden="true"><i>${of.image}</i>${of.discount ? `<em>−${of.discount}%</em>` : ''}</span>
+    <div class="offer-body">
+      <small class="eyebrow">${of.tone === 'sponsor' ? T('Sponsor moment', 'لحظة الراعي') : T('Team offer', 'عرض الفريق')} · ${esc(of.sponsor)}</small>
       <b>${esc(L(of.title))}</b>
-      <small class="muted">${icon('clock')} ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} ${T('left', 'متبقية')}</small></div>
-    ${preview ? '' : `<button class="btn btn-primary btn-sm" data-act="redeemOffer" data-arg="${of.id}">${T('Redeem', 'استخدم')}</button>`}
+      <small class="muted row gap-xs">${icon('timer')} ${offerCountdown(of)} ${T('left', 'متبقية')}</small>
+    </div>
+    ${preview ? `<span class="btn btn-orange btn-sm" aria-hidden="true">${T('Redeem', 'استخدم')}</span>` : `<button class="btn btn-orange btn-sm" data-act="redeemOffer" data-arg="${of.id}">${T('Redeem', 'استخدم')}</button>`}
   </article>`;
 }
+
+function flashCard(fl) {
+  const it = item(fl.item);
+  const left = Math.max(0, Math.round((fl.until - Date.now()) / 1000));
+  return `<article class="offer flash">
+    <span class="offer-media" style="--tint:${CAT_TINT[it.cat]}" aria-hidden="true"><i>${it.emoji}</i><em>−${fl.pct}%</em></span>
+    <div class="offer-body"><small class="eyebrow">${T('Flash crowd deal', 'عرض الزحام الخاطف')} · ${L(pickup(fl.zone).name)}</small>
+      <b>${L(it.name)}</b><small class="muted row gap-xs">${icon('timer')} ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} · ${T('calmer pickup', 'استلام أهدأ')}</small></div>
+    <button class="btn btn-orange btn-sm" data-act="addItem" data-arg="${it.id}">${T('Add', 'أضف')}</button>
+  </article>`;
+}
+
+function statusLabels(o) {
+  return [T('Received', 'تم الاستلام'), T('Preparing', 'قيد التحضير'), o.type === 'delivery' ? T('On the way', 'في الطريق') : T('Ready', 'جاهز'), T('Completed', 'مكتمل')];
+}
+
+/* Order progress uses a segmented bar (never the match timeline style). */
+function orderSteps(o, compact = false) {
+  const labels = statusLabels(o);
+  return `<div class="osteps ${compact ? 'compact' : ''}" role="progressbar" aria-valuemin="0" aria-valuemax="3" aria-valuenow="${o.status}" aria-valuetext="${labels[o.status]}">
+    ${labels.map((l, i) => `<div class="ostep ${i < o.status ? 'done' : i === o.status ? 'now' : ''}"><i></i>${compact ? '' : `<span>${l}</span>`}</div>`).join('')}
+  </div>`;
+}
+
+function clockText() {
+  const m = S.match;
+  if (m.phase === 'arrival' || m.phase === 'prematch') return T(`Starts in ${-m.minute} min`, `يبدأ بعد ${-m.minute} د`);
+  if (m.phase === 'halftime' || m.phase === 'final') return phaseLabel();
+  return `${m.minute}'`;
+}
+function isLive() { return ['kickoff', 'second'].includes(S.match.phase); }
 
 function matchHeader() {
   const ev = currentEvent();
   const m = S.match;
-  const concert = isConcert();
-  const clock = m.phase === 'arrival' || m.phase === 'prematch' ? T(`Starts in ${-m.minute} min`, `يبدأ بعد ${-m.minute} د`) : m.phase === 'halftime' ? T('HT', 'استراحة') : m.phase === 'final' ? T('FT', 'نهاية') : `${m.minute}'`;
-  return `<div class="score">
-    ${concert ? `<div class="score-concert"><b>${L(ev.title)}</b><span>${phaseLabel()}</span></div>` : `
-    <div class="score-team"><i class="team-dot" style="--tc:${TEAMS[ev.home].color}"></i>${TEAMS[ev.home].short}</div>
-    <div class="score-mid"><b>${m.home} – ${m.away}</b><span>${clock}${m.redCard ? ' · 🟥' : ''}</span></div>
-    <div class="score-team">${TEAMS[ev.away].short}<i class="team-dot" style="--tc:${TEAMS[ev.away].color}"></i></div>`}
+  if (isConcert()) {
+    return `<div class="fixture concert"><b class="fx-title">${esc(L(ev.title))}</b><span class="fx-clock">${clockText()}</span></div>`;
+  }
+  const crest = (t) => `<span class="crest" style="--tc:${TEAMS[t].color}">${TEAMS[t].short}</span>`;
+  return `<div class="fixture">
+    <div class="fx-team">${crest(ev.home)}<b>${L(TEAMS[ev.home].name)}</b></div>
+    <div class="fx-mid"><b class="fx-score" aria-label="${T('Score', 'النتيجة')} ${m.home} - ${m.away}"><span>${m.home}</span><i>–</i><span>${m.away}</span></b>
+      <span class="fx-clock">${clockText()}${m.redCard ? ' · 🟥' : ''}</span></div>
+    <div class="fx-team">${crest(ev.away)}<b>${L(TEAMS[ev.away].name)}</b></div>
   </div>`;
 }
 
+function liveChip() {
+  const m = S.match;
+  if (isLive()) return `<span class="live-chip"><i></i>${T('LIVE', 'مباشر')} · ${m.minute}'</span>`;
+  return `<span class="live-chip idle">${phaseLabel()}</span>`;
+}
+
+/* The match timeline: navy track with a sunburst on the current moment. */
 function timeline() {
   const idx = PHASES.indexOf(S.match.phase);
-  return `<ol class="timeline" aria-label="${T('Match timeline', 'المخطط الزمني')}">${PHASES.map((p, i) => `<li class="${i < idx ? 'done' : i === idx ? 'now' : ''}" ${i === idx ? 'aria-current="step"' : ''}><i></i><span>${phaseLabel(p)}</span></li>`).join('')}</ol>`;
+  return `<ol class="mline" aria-label="${T('Match timeline', 'سير المباراة')}">${PHASES.map((p, i) => `<li class="${i < idx ? 'done' : i === idx ? 'now' : ''}" ${i === idx ? 'aria-current="step"' : ''}>
+    <span class="mdot">${i === idx ? sunMark(22, 'brand-sun') : '<i></i>'}</span><span class="mlabel">${phaseLabel(p)}</span></li>`).join('')}</ol>`;
+}
+
+function primaryOrderBlock() {
+  const o = activeOrder();
+  if (o) {
+    const waitingHT = o.schedule === 'halftime' && o.status === 0 && !['halftime', 'second', 'final'].includes(S.match.phase);
+    return `<div class="primary-card order-live">
+      <div class="row between"><div><small class="eyebrow">${T('Your order', 'طلبك')} · ${o.id}</small>
+        <h2 class="h2">${statusLabels(o)[o.status]}</h2></div>
+        <div class="eta-box"><b>${waitingHT ? T('HT', 'استراحة') : '~' + mins(estimate(o))}</b><small>${T('estimate', 'متوقع')}</small></div></div>
+      ${orderSteps(o)}
+      <div class="row between mt-s wrap gap">
+        <span class="muted small row gap-xs">${icon(o.type === 'delivery' ? 'truck' : 'pin')} ${o.type === 'delivery' ? T('To seat', 'إلى المقعد') + ' ' + seatLabel() : L(pickup(o.dest).name) + ' · ' + T('code', 'الرمز') + ' ' + o.code}</span>
+        <button class="btn btn-orange" data-act="go" data-arg="track/${o.id}">${T('Track order', 'تتبع الطلب')} ${icon('chevron', 'flip')}</button>
+      </div>
+    </div>`;
+  }
+  const near = nearestPickup();
+  return `<div class="primary-card order-cta-card">
+    <div class="grow"><h2 class="h2">${T('Hungry? Skip the queue', 'جوعان؟ اطلب بدون طابور')}</h2>
+      <p class="muted small">${T('Food, drinks and club merchandise', 'طعام ومشروبات ومنتجات النادي')} · ${L(near.name)} ~${mins(pickupWait(near.id))}</p></div>
+    <button class="btn btn-orange btn-lg" data-act="go" data-arg="menu">${icon('bag')} ${T('Order now', 'اطلب الآن')}</button>
+  </div>`;
+}
+
+function nowSection() {
+  const all = companionMoments().filter((c) => c.id !== 'active');
+  const [top, ...rest] = all;
+  const card = (c) => `<article class="moment moment-${c.kind}">
+    <span class="moment-ic">${icon(c.icon)}</span>
+    <div class="grow"><b>${c.title}</b><p>${c.body}</p>
+      <div class="row gap wrap mt-xs"><button class="btn btn-primary btn-sm" data-act="${c.cta.act}" data-arg="${c.cta.arg || ''}">${c.cta.label}</button>
+      ${c.cta2 ? `<button class="btn btn-ghost btn-sm" data-act="${c.cta2.act}" data-arg="${c.cta2.arg || ''}">${c.cta2.label}</button>` : ''}</div></div>
+    <button class="icon-btn xs" data-act="dismissMoment" data-arg="${c.id}" aria-label="${T('Dismiss', 'إخفاء')}">${icon('x')}</button>
+  </article>`;
+  if (!top) return `<p class="muted small">${T('All set — enjoy the match. We will nudge you when something useful comes up.', 'كل شيء جاهز — استمتع بالمباراة. سننبهك عند وجود شيء مفيد.')}</p>`;
+  return card(top) + (rest.length ? `<details class="more"><summary>${rest.length === 1 ? T('1 more suggestion', 'اقتراح آخر') : T(`${rest.length} more suggestions`, `${rest.length} اقتراحات أخرى`)} ${icon('down')}</summary>${rest.map(card).join('')}</details>` : '');
 }
 
 function viewHome() {
   const ev = currentEvent();
   const sec = S.setup.section;
   const near = nearestPickup();
-  const heat = S.match.intensity;
-  return `<section class="page home ${heat > 80 ? 'heat' : ''}">
-    <div class="hero">
+  return `<section class="page home ${S.match.intensity > 80 ? 'heat' : ''}">
+    <div class="hero hero-match h-hero">
       ${stadiumArt()}
       <div class="hero-in">
-        <div class="row between"><span class="pill pill-glass">${icon('pin')} ${esc(L(ev.venue))}</span>
-          <button class="pill pill-glass" data-act="go" data-arg="setup">${T('Change', 'تغيير')}</button></div>
-        <h1 class="hero-title">${esc(L(ev.title))}</h1>
-        <p class="hero-sub">${esc(L(ev.league))}</p>
-        ${live('score', matchHeader)}
+        <div class="row between"><span class="pill pill-glass venue">${icon('pin')}<span>${esc(L(ev.venue))}</span></span>${live('live-chip', liveChip, 'span')}</div>
+        <div>
+          <p class="hero-sub">${esc(L(ev.league))}</p>
+          ${live('score', matchHeader)}
+        </div>
+        <div class="seat-strip">
+          <span class="seat-chip">${icon('ticket')}<span><b>${T('Section', 'القسم')} ${sec}</b> · ${T('Row', 'صف')} ${S.setup.row} · ${T('Seat', 'مقعد')} ${S.setup.seat}</span></span>
+          <button class="btn btn-glass btn-sm" data-act="findSeat" data-arg="${sec}">${icon('route')} ${T('Find my seat', 'اعثر على مقعدي')}</button>
+        </div>
       </div>
     </div>
 
-    <div class="glance">
-      <button class="g-card" data-act="findSeat" data-arg="${sec}"><span class="g-l">${icon('ticket')} ${T('Seat', 'المقعد')}</span><b>${seatLabel()}</b><small>${T('Find my seat', 'اعثر على مقعدي')}</small></button>
-      ${live('g-crowd', () => `<div class="g-card"><span class="g-l">${icon('users')} ${T('Crowd', 'الكثافة')}</span><b class="lvl-${levelKind(S.crowd[sec])}">${levelWord(S.crowd[sec])}</b><small>${T('Section', 'القسم')} ${sec}</small></div>`)}
-      ${live('g-wait', () => `<div class="g-card"><span class="g-l">${icon('clock')} ${T('Wait', 'الانتظار')}</span><b>${mins(pickupWait(near.id))}</b><small>${L(near.name)}</small></div>`)}
-      <button class="g-card" data-act="go" data-arg="profile"><span class="g-l">${icon('star')} ${T('Points', 'النقاط')}</span><b>${S.points}</b><small>${L(TIERS[tierOf(S.points)].name)}</small></button>
+    <div class="h-primary">${live('primary', primaryOrderBlock)}</div>
+
+    <div class="h-facts facts">${live('facts', () => `
+      <div class="fact"><span>${icon('clock')} ${T('Pickup wait', 'انتظار الاستلام')}</span><b>${mins(pickupWait(near.id))}</b><small>${L(near.name)}</small></div>
+      <div class="fact"><span>${icon('users')} ${T('Crowd', 'الكثافة')}</span><b class="lvl-${levelKind(S.crowd[sec])}">${levelWord(S.crowd[sec])}</b><small>${T('Section', 'القسم')} ${sec}</small></div>
+      <button class="fact" data-act="go" data-arg="profile"><span>${icon('star')} ${T('Points', 'النقاط')}</span><b>${S.points}</b><small>${L(TIERS[tierOf(S.points)].name)}</small></button>`)}
     </div>
 
-    <div class="home-cols">
-    <div class="home-a">
-    ${live('active-order', () => { const o = activeOrder(); return o ? activeOrderStrip(o) : ''; }, 'div', 'ho-0')}
-    </div>
-    <div class="home-b">
-    <div class="card companion">
-      <div class="row between"><h2 class="h2">${sunMark(22, 'brand-sun')} ${T('Matchday Companion', 'رفيق المباراة')}</h2>${live('phase-pill', () => pill(phaseLabel(), 'brand'), 'span')}</div>
+    <section class="h-now block">
+      <div class="block-head"><h2 class="h2">${sunMark(20, 'brand-sun')} ${T('Now', 'الآن')}</h2>${live('phase-pill', () => pill(phaseLabel(), 'brand'), 'span')}</div>
+      ${live('companion', nowSection)}
+    </section>
+
+    <section class="h-match block tinted">
+      <div class="block-head"><h2 class="h3">${T('Match timeline', 'سير المباراة')}</h2>${live('mclock', () => `<span class="muted small">${clockText()}</span>`, 'span')}</div>
       ${live('timeline', timeline)}
-      ${live('companion', () => companionMoments().map((c) => `<article class="moment moment-${c.kind}">
-        <span class="moment-ic">${icon(c.icon)}</span>
-        <div class="grow"><b>${c.title}</b><p>${c.body}</p>
-          <div class="row gap wrap mt-xs"><button class="btn btn-primary btn-sm" data-act="${c.cta.act}" data-arg="${c.cta.arg || ''}">${c.cta.label}</button>
-          ${c.cta2 ? `<button class="btn btn-ghost btn-sm" data-act="${c.cta2.act}" data-arg="${c.cta2.arg || ''}">${c.cta2.label}</button>` : ''}</div></div>
-        ${c.id !== 'active' ? `<button class="icon-btn sm" data-act="dismissMoment" data-arg="${c.id}" aria-label="${T('Dismiss', 'إخفاء')}">${icon('x')}</button>` : ''}
-      </article>`).join('') || `<p class="muted">${T('All set. Enjoy the match!', 'كل شيء جاهز. استمتع بالمباراة!')}</p>`)}
-    </div>
-    </div>
-    <div class="home-a">
+    </section>
 
-    <button class="btn btn-primary btn-xl w-full order-cta" data-act="go" data-arg="menu">${icon('bag')} ${T('Order food & drinks', 'اطلب طعاماً ومشروبات')}<small>${T('Pickup or seat delivery', 'استلام أو توصيل للمقعد')}</small></button>
+    <div class="h-offer">${live('offers', () => { const fl = S.flash; const of = liveOffersForFan()[0]; return fl ? flashCard(fl) : of ? offerCard(of) : ''; })}</div>
 
-    ${live('offers', () => { const offs = liveOffersForFan(); const fl = S.flash; return (fl ? flashCard(fl) : '') + offs.slice(0, 2).map((o) => offerCard(o)).join(''); })}
-
-    <div class="card">
-      <div class="row between"><h2 class="h2">${T('Stadium map', 'خريطة الملعب')}</h2><button class="link" data-act="go" data-arg="map">${T('Open map', 'افتح الخريطة')} ${icon('chevron', 'flip')}</button></div>
+    <section class="h-map block panel">
+      <div class="block-head"><h2 class="h2">${T('Stadium map', 'خريطة الملعب')}</h2><button class="link" data-act="go" data-arg="map">${T('Open full map', 'افتح الخريطة')} ${icon('chevron', 'flip')}</button></div>
       ${stadiumMap({ id: 'home-map', compact: true })}
-      ${live('pickups', () => `<div class="pickup-row">${PICKUPS.map((p) => { const l = pickupLoad(p.id); return `<button class="pickup-chip lvl-b-${levelKind(l)}" data-act="mapInfo" data-arg="pick:${p.id}"><b>${L(p.name)}</b><small>${levelWord(l)} · ${mins(pickupWait(p.id))}</small></button>`; }).join('')}</div>`)}
-    </div>
+      ${live('pickups', () => `<div class="pickup-row">${PICKUPS.map((p) => { const l = pickupLoad(p.id); return `<button class="pickup-chip" data-act="mapInfo" data-arg="pick:${p.id}"><i class="dot lvl-bg-${levelKind(l)}"></i><span><b>${L(p.name)}</b><small>${levelWord(l)} · ${mins(pickupWait(p.id))}</small></span></button>`; }).join('')}</div>`)}
+    </section>
 
-    <div class="highlights">
-      <button class="hl" data-act="go" data-arg="group">${foodTile('👥')}<b>${T('Group Order', 'طلب جماعي')}</b><small>${S.group ? T('Code', 'الرمز') + ' ' + S.group.code : T('Order together', 'اطلبوا معاً')}</small></button>
-      <button class="hl" data-act="go" data-arg="play">${foodTile('🏆')}<b>${T('Play', 'العب')}</b><small>${T('Predict & win', 'توقع واربح')}</small></button>
-      <button class="hl" data-act="go" data-arg="shop">${foodTile('🧣')}<b>${T('Club Shop', 'متجر النادي')}</b><small>${S.unlocked.includes('x77') ? T("77' drop live", 'إصدار 77 متاح') : T('Jerseys & more', 'قمصان والمزيد')}</small></button>
-    </div>
-    </div>
-    </div>
+    <nav class="h-explore explore" aria-label="${T('Explore', 'استكشف')}">
+      <button class="tile" data-act="go" data-arg="group">${icon('users')}<b>${T('Group order', 'طلب جماعي')}</b><small>${S.group ? T('Code', 'الرمز') + ' ' + S.group.code : T('Order together', 'اطلبوا معاً')}</small></button>
+      <button class="tile" data-act="go" data-arg="play">${icon('trophy')}<b>${T('Play', 'العب')}</b><small>${T('Optional games', 'ألعاب اختيارية')}</small></button>
+      <button class="tile" data-act="go" data-arg="shop">${icon('shirt')}<b>${T('Club Shop', 'متجر النادي')}</b><small>${S.unlocked.includes('x77') ? T("77' drop live", 'إصدار 77 متاح') : T('Jerseys & more', 'قمصان والمزيد')}</small></button>
+    </nav>
   </section>`;
-}
-
-function flashCard(fl) {
-  const it = item(fl.item);
-  const left = Math.max(0, Math.round((fl.until - Date.now()) / 1000));
-  return `<article class="offer-card flash"><span class="offer-img">${it.emoji}</span>
-    <div class="grow"><small class="offer-tag">${icon('bolt')} ${T('Flash Crowd Deal', 'عرض الزحام الخاطف')} · ${L(pickup(fl.zone).name)}</small>
-    <b>${L(it.name)} −${fl.pct}%</b><small class="muted">${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} ${T('left · calmer pickup', 'متبقية · استلام أهدأ')}</small></div>
-    <button class="btn btn-primary btn-sm" data-act="addItem" data-arg="${it.id}">${T('Add', 'أضف')}</button></article>`;
-}
-
-function activeOrderStrip(o) {
-  const labels = statusLabels(o);
-  return `<button class="active-strip" data-act="go" data-arg="track/${o.id}">
-    <span class="as-ic">${icon(o.type === 'delivery' ? 'truck' : 'store')}</span>
-    <span class="grow"><b>${o.id} · ${labels[o.status]}</b><small>${o.type === 'delivery' ? T('To seat', 'إلى المقعد') + ' ' + seatLabel() : L(pickup(o.dest).name)} · ${o.schedule === 'halftime' && o.status === 0 ? T('Scheduled for halftime', 'مجدول للاستراحة') : '~' + mins(estimate(o))}</small>
-      <span class="progress"><i style="width:${[12, 45, 80, 100][o.status]}%"></i></span></span>
-    ${icon('chevron', 'flip')}
-  </button>`;
-}
-
-function statusLabels(o) {
-  return [T('Queued', 'في الانتظار'), T('Preparing', 'قيد التحضير'), o.type === 'delivery' ? T('On the way', 'في الطريق') : T('Ready', 'جاهز'), T('Completed', 'مكتمل')];
 }
 
 /* ---------- full map ---------- */
@@ -249,35 +303,39 @@ function viewMap() {
   const gate = GATES.find((g) => g.id === S.setup.gate);
   const r = routeToSeat(gate.angle, sec);
   return `<section class="page">
-    <div class="row between"><h1 class="title">${T('Stadium map', 'خريطة الملعب')}</h1>
+    <div class="page-head"><h1 class="title">${T('Stadium map', 'خريطة الملعب')}</h1>
       <div class="seg" role="group" aria-label="${T('Map detail', 'تفاصيل الخريطة')}">
         <button class="${!detailed ? 'on' : ''}" data-act="mapMode" data-arg="simple" aria-pressed="${!detailed}">${T('Simple', 'مبسطة')}</button>
         <button class="${detailed ? 'on' : ''}" data-act="mapMode" data-arg="detailed" aria-pressed="${detailed}">${T('Detailed', 'مفصلة')}</button></div></div>
-    <div class="row gap wrap mb">
-      <button class="chip-lg ${S.heatmap ? 'on' : ''}" data-act="toggleHeat" aria-pressed="${S.heatmap}">${icon('layers')} ${T('Crowd heatmap', 'خريطة الكثافة')}</button>
-      <button class="chip-lg ${MAPSTATE.route ? 'on' : ''}" data-act="findSeat" data-arg="${sec}" aria-pressed="${MAPSTATE.route}">${icon('route')} ${T('Find my seat', 'اعثر على مقعدي')}</button>
-      ${Object.keys(SECTIONS).map((k) => `<button class="chip-lg ${MAPSTATE.route && sec === k ? 'on' : ''}" data-act="findSeat" data-arg="${k}">${T('Route to', 'إلى')} ${k}</button>`).join('')}
+    <div class="toolbar">
+      <button class="chip ${S.heatmap ? 'on' : ''}" data-act="toggleHeat" aria-pressed="${S.heatmap}">${icon('layers')} ${T('Crowd levels', 'مستوى الزحام')}</button>
+      <span class="toolbar-sep"></span>
+      <span class="muted small">${T('Route to', 'المسار إلى')}</span>
+      ${Object.keys(SECTIONS).map((k) => `<button class="chip ${MAPSTATE.route && sec === k ? 'on' : ''}" data-act="findSeat" data-arg="${k}" aria-pressed="${MAPSTATE.route && sec === k}">${T('Section', 'القسم')} ${k}${k === S.setup.section ? ' · ' + T('mine', 'قسمي') : ''}</button>`).join('')}
     </div>
     <div class="map-layout">
-      <div class="card map-card">${stadiumMap({ id: 'full-map', route: MAPSTATE.route, routeSection: sec, detailed, facilities: true })}</div>
+      <div class="panel map-card">${stadiumMap({ id: 'full-map', route: MAPSTATE.route, routeSection: sec, detailed, facilities: true })}${mapLegend(detailed)}</div>
       <div class="map-side">
-        ${MAPSTATE.route ? `<div class="card route-card ${r.detour ? 'detour' : ''}">
-          <h2 class="h2">${icon('route')} ${T('Route to Section', 'المسار إلى القسم')} ${sec}</h2>
-          <div class="stat-grid">${statCard(T('From', 'من'), gate.id)}${statCard(T('Walk', 'المشي'), mins(walkMins(r.len, sec)))}${statCard(T('Distance', 'المسافة'), Math.round(r.len) + ' m')}</div>
+        ${MAPSTATE.route ? `<div class="panel route-card ${r.detour ? 'detour' : ''}">
+          <h2 class="h3">${icon('route')} ${T('Route to Section', 'المسار إلى القسم')} ${sec}</h2>
+          <div class="kpi-row">${statCard(T('From', 'من'), gate.id)}${statCard(T('Walk', 'المشي'), mins(walkMins(r.len, sec)))}${statCard(T('Distance', 'المسافة'), Math.round(r.len) + (S.lang === 'ar' ? ' م' : ' m'))}</div>
           ${r.detour ? `<div class="notice warn mt-s">${icon('alert')}<span>${T('Detour active: a concourse segment is closed.', 'مسار بديل: جزء من الممر مغلق.')}</span></div>` : ''}
           <ol class="directions">
             <li>${T(`Enter at ${L(gate.name)}`, `ادخل من ${L(gate.name)}`)}</li>
-            <li>${T(`Follow the concourse ${r.dir > 0 ? 'clockwise' : 'anticlockwise'} (${Math.round(r.span)}°)`, `اتبع الممر ${r.dir > 0 ? 'باتجاه عقارب الساعة' : 'عكس عقارب الساعة'}`)}</li>
+            <li>${T(`Follow the concourse ${r.dir > 0 ? 'clockwise' : 'anticlockwise'}`, `اتبع الممر ${r.dir > 0 ? 'باتجاه عقارب الساعة' : 'عكس عقارب الساعة'}`)}</li>
             <li>${T(`Take stairway ${sec}${S.setup.row > 10 ? '2' : '1'} — lift available`, `خذ الدرج ${sec}${S.setup.row > 10 ? '2' : '1'} — يتوفر مصعد`)}</li>
             <li>${T(`Row ${S.setup.row}, seat ${S.setup.seat}`, `الصف ${S.setup.row}، المقعد ${S.setup.seat}`)}</li>
           </ol>
-          <button class="btn btn-primary w-full" data-act="arrivedSeat">${icon('check')} ${T("I'm in my seat", 'وصلت لمقعدي')}</button>
-        </div>` : ''}
-        <div class="card">${live('map-zones', () => `<h2 class="h2">${T('Live conditions', 'الحالة المباشرة')}</h2>
+          <button class="btn btn-orange w-full" data-act="arrivedSeat">${icon('check')} ${T("I'm in my seat", 'وصلت لمقعدي')}</button>
+        </div>` : `<div class="panel"><h2 class="h3">${icon('route')} ${T('Navigate', 'التنقل')}</h2><p class="muted small">${T('Pick a section above to see a walking route from your gate.', 'اختر قسماً من الأعلى لعرض مسار المشي من بوابتك.')}</p>
+          <button class="btn btn-orange w-full mt-s" data-act="findSeat" data-arg="${S.setup.section}">${T('Route to my seat', 'المسار إلى مقعدي')}</button></div>`}
+        <div class="panel">${live('map-zones', () => `<h2 class="h3">${T('Live conditions', 'الحالة المباشرة')}</h2>
           <ul class="zone-list">${['A', 'B', 'C'].map((k) => `<li><span>${T('Section', 'القسم')} ${k}</span><span class="bar"><i class="lvl-bg-${levelKind(S.crowd[k])}" style="width:${S.crowd[k]}%"></i></span><b>${levelWord(S.crowd[k])}</b></li>`).join('')}
           ${PICKUPS.map((p) => `<li><span>${L(p.name)}</span><span class="bar"><i class="lvl-bg-${levelKind(pickupLoad(p.id))}" style="width:${pickupLoad(p.id)}%"></i></span><b>${mins(pickupWait(p.id))}</b></li>`).join('')}</ul>`)}
         </div>
-        <div class="card">${mapLegend(detailed)}</div>
+        <div class="panel flat"><h2 class="h3">${icon('pin')} ${T('My location', 'موقعي')}</h2>
+          <p class="muted small">${S.setup.locationMode === 'gps' ? T('Located near your gate.', 'تم تحديد موقعك قرب بوابتك.') : T('Location sharing is off — your section is set manually.', 'مشاركة الموقع متوقفة — قسمك محدد يدوياً.')}</p>
+          <div class="row gap wrap mt-xs">${Object.keys(SECTIONS).map((k) => `<button class="chip ${S.setup.section === k ? 'on' : ''}" data-act="setSection" data-arg="${k}">${T('I am in', 'أنا في')} ${k}</button>`).join('')}</div></div>
       </div>
     </div>
   </section>`;

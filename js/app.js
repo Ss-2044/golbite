@@ -19,14 +19,28 @@ const FAN_NAV = [
   ['profile', 'user', { en: 'Profile', ar: 'حسابي' }],
 ];
 const NAV_OWNER = { home: 'home', map: 'home', menu: 'orders', summary: 'orders', track: 'orders', orders: 'orders', group: 'orders', play: 'play', shop: 'shop', profile: 'profile', settings: 'profile' };
+const ROLE_HOME = { fan: 'home', operator: 'ops/overview', partner: 'partner/results' };
+const ROLES = () => [['fan', T('Fan', 'مشجع'), 'user'], ['operator', T('Venue', 'المشغّل'), 'store'], ['partner', T('Partner', 'الشريك'), 'megaphone']];
+/* Navigation items per role: [route, icon, label, ownerKey] */
+function navItems() {
+  if (S.role === 'operator') return OPS_NAV.map(([k, ic, l]) => [`ops/${k}`, ic, l, k]);
+  if (S.role === 'partner') return PARTNER_NAV.map(([k, ic, l]) => [`partner/${k}`, ic, l, k]);
+  return FAN_NAV.map(([k, ic, l]) => [k, ic, l, k]);
+}
+function navActive() {
+  const r = route();
+  if (S.role === 'operator') return r.name === 'ops' && OPS_NAV.some(([k]) => k === r.arg) ? r.arg : 'overview';
+  if (S.role === 'partner') return r.name === 'partner' && PARTNER_NAV.some(([k]) => k === r.arg) ? r.arg : 'results';
+  return NAV_OWNER[r.name] || 'home';
+}
 
 function currentView() {
   const r = route();
   if (!S.user) return { key: 'signin', html: viewSignin };
   if (!S.setup || r.name === 'setup') return { key: 'setup', html: viewSetup };
-  if (S.role === 'operator') return { key: 'ops', html: viewOps };
-  if (S.role === 'partner') return { key: 'partner', html: viewPartner };
-  const map = { home: viewHome, map: viewMap, menu: viewMenu, summary: viewSummary, track: () => viewTrack(r.arg), orders: viewOrders, group: viewGroup, play: viewPlay, shop: viewShop, profile: viewProfile, settings: viewSettings };
+  if (S.role === 'operator') return { key: 'ops', html: () => viewOps(r.name === 'ops' ? r.arg : 'overview') };
+  if (S.role === 'partner') return { key: 'partner', html: () => viewPartner(r.name === 'partner' ? r.arg : 'results') };
+  const map = { home: viewHome, map: viewMap, menu: viewMenu, summary: viewSummary, track: () => viewTrack(r.arg), orders: viewOrders, group: viewGroup, play: viewPlay, shop: viewShop, profile: () => viewProfile(r.arg), settings: viewSettings };
   return { key: r.name, html: map[r.name] || viewHome };
 }
 
@@ -52,14 +66,17 @@ function rerender() {
   LIVE = {};
   const inApp = S.user && S.setup && v.key !== 'setup';
   const fan = S.role === 'fan';
-  const navOwner = NAV_OWNER[route().name] || 'home';
-  app.className = inApp ? 'shell' : 'shell bare';
+  const active = navActive();
+  const navLink = ([path, ic, l, key]) => `<a href="#/${path}" class="${active === key ? 'on' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon(ic)}<span>${L(l)}</span>${fan && key === 'orders' && activeOrder() ? '<i class="dot"></i>' : ''}${S.role === 'operator' && key === 'orders' && allOpsOrders().some(needsAttention) ? '<i class="dot alert"></i>' : ''}</a>`;
+  app.className = inApp ? `shell role-${S.role}` : 'shell bare';
   app.innerHTML = `
     ${inApp ? topbar() : `<div class="mini-top"><img src="assets/logo.png" alt="GolBite" class="logo-img"/>${langBtn()}</div>`}
-    ${inApp && fan ? `<nav class="sidenav" aria-label="${T('Main', 'الرئيسية')}">${FAN_NAV.map(([k, ic, l]) => `<a href="#/${k}" class="${navOwner === k ? 'on' : ''}" ${navOwner === k ? 'aria-current="page"' : ''}>${icon(ic)}<span>${L(l)}</span>${k === 'orders' && activeOrder() ? '<i class="dot"></i>' : ''}</a>`).join('')}
-      <div class="sidenav-foot"><a href="#/settings">${icon('settings')}<span>${T('Settings', 'الإعدادات')}</span></a></div></nav>` : ''}
+    ${inApp ? `<nav class="sidenav" aria-label="${T('Main', 'الرئيسية')}">
+      <div class="sidenav-role">${roleBadge()}</div>
+      ${navItems().map(navLink).join('')}
+      <div class="sidenav-foot">${fan ? `<a href="#/settings">${icon('settings')}<span>${T('Settings', 'الإعدادات')}</span></a>` : `<button class="side-switch" data-act="setRole" data-arg="fan">${icon('user')}<span>${T('Back to fan view', 'العودة لواجهة المشجع')}</span></button>`}</div></nav>` : ''}
     <main id="main" tabindex="-1">${v.html()}</main>
-    ${inApp && fan ? `<nav class="bottomnav" aria-label="${T('Main', 'الرئيسية')}">${FAN_NAV.map(([k, ic, l]) => `<a href="#/${k}" class="${navOwner === k ? 'on' : ''}" ${navOwner === k ? 'aria-current="page"' : ''}>${icon(ic)}<span>${L(l)}</span>${k === 'orders' && activeOrder() ? '<i class="dot"></i>' : ''}</a>`).join('')}</nav>` : ''}
+    ${inApp ? `<nav class="bottomnav n${navItems().length}" aria-label="${T('Main', 'الرئيسية')}">${navItems().map(navLink).join('')}</nav>` : ''}
     ${inApp ? `<button class="demo-fab" data-act="openDemo" aria-label="${T('Demo controls', 'أدوات العرض')}" title="${T('Demo controls', 'أدوات العرض')}">${icon('flask')}</button>` : ''}
   `;
   const main = document.getElementById('main');
@@ -71,16 +88,22 @@ function rerender() {
   document.querySelectorAll('[data-live]').forEach((el) => (el._last = el.innerHTML));
 }
 
+function roleBadge() {
+  const r = ROLES().find(([k]) => k === S.role);
+  const sub = { fan: T('Matchday companion', 'رفيق المباراة'), operator: T('Venue Control Center', 'مركز التحكم بالملعب'), partner: T('Club & partner hub', 'مركز النادي والشركاء') }[S.role];
+  return `<span class="role-badge r-${S.role}">${icon(r[2])}<span><b>${r[1]}</b><small>${sub}</small></span></span>`;
+}
 function topbar() {
   const ev = currentEvent();
   return `<header class="topbar">
     <a href="#/home" class="brand" aria-label="GolBite ${T('home', 'الرئيسية')}"><img src="assets/logo.png" alt="GolBite" class="logo-img"/></a>
     <div class="top-event"><span class="team-dot" style="--tc:${myTeam().color}"></span><span class="ellipsis">${esc(L(ev.title))}</span>${live('top-clock', () => `<b>${S.match.phase === 'arrival' || S.match.phase === 'prematch' ? phaseLabel() : S.match.phase === 'halftime' || S.match.phase === 'final' ? phaseLabel() : S.match.minute + "'"}</b>`, 'span')}</div>
     <div class="role-switch seg" role="group" aria-label="${T('Switch role', 'تبديل الدور')}">
-      ${[['fan', T('Fan', 'مشجع'), 'user'], ['operator', T('Venue', 'المكان'), 'store'], ['partner', T('Partner', 'شريك'), 'megaphone']].map(([k, l, ic]) => `<button class="${S.role === k ? 'on' : ''}" data-act="setRole" data-arg="${k}" aria-pressed="${S.role === k}">${icon(ic)}<span>${l}</span></button>`).join('')}
+      ${ROLES().map(([k, l, ic]) => `<button class="${S.role === k ? 'on' : ''}" data-act="setRole" data-arg="${k}" aria-pressed="${S.role === k}">${icon(ic)}<span>${l}</span></button>`).join('')}
     </div>
     ${langBtn()}
-  </header>`;
+  </header>
+  ${S.role !== 'fan' ? `<div class="role-bar r-${S.role}">${roleBadge()}<span class="muted xs">${T('Demo role — switch any time from the top bar.', 'دور تجريبي — بدّل في أي وقت من الشريط العلوي.')}</span></div>` : ''}`;
 }
 function langBtn() {
   return `<button class="lang-btn" data-act="setLang" data-arg="${S.lang === 'ar' ? 'en' : 'ar'}" aria-label="${S.lang === 'ar' ? 'Switch to English' : 'التبديل إلى العربية'}" lang="${S.lang === 'ar' ? 'en' : 'ar'}">${icon('globe')}<span>${S.lang === 'ar' ? 'EN' : 'عربي'}</span></button>`;
@@ -111,8 +134,9 @@ const A = {
   closeSheet: () => closeSheet(),
   dismissCelebrate: () => dismissCelebrate(),
   confirmOk: () => { const cb = SHEET?.onOk; SHEET = null; renderSheet(); cb && cb(); },
-  setRole: (r) => { S.role = r; commit(); toast(T(`Viewing as ${{ fan: 'Fan', operator: 'Venue Operator', partner: 'Club / Partner' }[r]}`, `العرض كـ ${{ fan: 'مشجع', operator: 'مشغّل المكان', partner: 'النادي / الشريك' }[r]}`)); },
-  roleGo: (a) => { const [r, p] = a.split(':'); S.role = r; save(); go(p); },
+  setRole: (r) => { S.role = r; closeSheetSilently(); save(); go(ROLE_HOME[r]); toast(T(`Switched to ${{ fan: 'Fan', operator: 'Venue Operator', partner: 'Club / Partner' }[r]} mode`, `تم التبديل إلى وضع ${{ fan: 'المشجع', operator: 'مشغّل الملعب', partner: 'النادي / الشريك' }[r]}`)); },
+  roleGo: (a) => { const [r, p] = a.split(':'); S.role = r; closeSheetSilently(); save(); go(p || ROLE_HOME[r]); },
+  setSection: (k) => { S.setup.section = k; S.setup.locationMode = 'manual'; S.cart.dest = null; commit(); toast(T(`Location set to Section ${k}`, `تم تحديد موقعك في القسم ${k}`), 'success'); },
   setLang: (l) => { S.lang = l; commit(); },
   quickDemo: () => {
     S.user = { name: 'Sara', handle: 'sara@golbite.demo' };
@@ -139,7 +163,7 @@ const A = {
   requestLocation: () => {
     const d = setupDraft();
     const status = document.getElementById('loc-status');
-    if (status) status.innerHTML = `<div class="notice info mt-s"><span class="spinner"></span><span>${T('Requesting location…', 'جارٍ طلب الموقع…')}</span></div>`;
+    if (status) status.innerHTML = `<div class="notice info mt-s">${spinner()}<span>${T('Requesting location…', 'جارٍ طلب الموقع…')}</span></div>`;
     const fail = () => { d.locationMode = 'denied'; rerender(); };
     if (!navigator.geolocation) return fail();
     navigator.geolocation.getCurrentPosition(() => { d.locationMode = 'gps'; d.gate = 'G1'; if (!d.section) d.section = 'A'; rerender(); }, fail, { timeout: 7000 });
@@ -164,7 +188,8 @@ const A = {
   redeemOffer: (id) => {
     const of = S.offers.find((o) => o.id === id);
     if (!of) return;
-    of.redemptions++;
+    of.m[S.match.phase].r++;
+    of.s[S.setup.section] = (of.s[S.setup.section] || 0) + 1;
     const it = of.item || 'd2';
     if (!S.vouchers.some((v) => v.offer === id)) S.vouchers.unshift({ id: uid('v'), offer: id, item: it, pct: of.discount || 25, label: { en: `${L({ en: of.title.en || of.title })} (−${of.discount}%)`, ar: `${of.title.ar || of.title} (−${of.discount}%)` } });
     S.cart.items[it] = (S.cart.items[it] || 0) + 1;
@@ -177,37 +202,49 @@ const A = {
   cartSchedule: (s) => { S.cart.schedule = s; commit(); },
   addItem: (id) => {
     if (S.soldOut.includes(id)) { toast(T('Sold out — try the suggested alternative.', 'نفد — جرّب البديل المقترح.'), 'warn'); return; }
-    S.cart.items[id] = (S.cart.items[id] || 0) + 1; commit();
-    if (route().name !== 'menu' && route().name !== 'summary' && !SHEET) toast(`${item(id).emoji} ${L(item(id).name)} ${T('added', 'أضيف')} · <a href="#/summary">${T('Review', 'مراجعة')}</a>`, 'success');
+    if (item(id).opts) return A.itemInfo(id);
+    A.addLine(id);
   },
-  removeItem: (id) => { if (!S.cart.items[id]) return; S.cart.items[id]--; if (!S.cart.items[id]) delete S.cart.items[id]; commit(); },
+  addLine: (key, el) => {
+    const { id, opt } = pkey(key);
+    if (S.soldOut.includes(id)) return;
+    S.cart.items[key] = (S.cart.items[key] || 0) + 1;
+    const fromSheetCta = el?.classList?.contains('sheet-add');
+    if (fromSheetCta) closeSheetSilently();
+    commit();
+    if (fromSheetCta || (route().name !== 'menu' && route().name !== 'summary' && !SHEET)) toast(`${item(id).emoji} ${lineName(id, opt)} ${T('added', 'أضيف')} · <a href="#/summary">${T('Review order', 'مراجعة الطلب')}</a>`, 'success');
+  },
+  removeLine: (key) => { if (!S.cart.items[key]) return; S.cart.items[key]--; if (!S.cart.items[key]) delete S.cart.items[key]; commit(); },
+  removeItem: (id) => { const k = Object.keys(S.cart.items).reverse().find((x) => pkey(x).id === id); if (k) A.removeLine(k); },
+  destSheet: () => openSheet(destSheet, { live: true, label: T('Destination', 'الوجهة') }),
+  shopCat: (c) => { S.shopCat = c; commit(); },
   comboAdd: () => { S.cart.combo = (S.cart.combo || 0) + 1; commit(); },
   comboRemove: () => { S.cart.combo = Math.max(0, (S.cart.combo || 0) - 1); commit(); },
   menuCat: (c) => { S.menuCat = c; commit(); },
   menuDiet: (d) => { S.menuDiet = S.menuDiet.includes(d) ? S.menuDiet.filter((x) => x !== d) : [...S.menuDiet, d]; commit(); },
   clearDiet: () => { S.menuDiet = []; commit(); },
   toggleFav: (id) => { S.favorites = S.favorites.includes(id) ? S.favorites.filter((x) => x !== id) : [...S.favorites, id]; commit(); },
-  itemInfo: (id) => openSheet(() => itemInfoSheet(id), { label: L(item(id).name) }),
+  itemInfo: (id) => { SHEETOPT = null; openSheet(() => itemInfoSheet(id), { label: L(item(id).name) }); },
   reorder: (id) => {
     const o = S.orders.find((x) => x.id === id);
     S.cart.items = {}; S.cart.combo = 0;
-    o.items.forEach((i) => { if (i.combo) return; const use = S.soldOut.includes(i.id) ? ALTERNATIVES[i.id] : i.id; S.cart.items[use] = (S.cart.items[use] || 0) + i.qty; });
+    o.items.forEach((i) => { if (i.combo) return; const k = S.soldOut.includes(i.id) ? ALTERNATIVES[i.id] : ckey(i.id, i.opt); S.cart.items[k] = (S.cart.items[k] || 0) + i.qty; });
     const comboQ = o.items.find((i) => i.combo)?.qty; if (comboQ) S.cart.combo = comboQ;
     S.cart.type = o.type; S.cart.dest = o.dest; S.cart.schedule = 'now';
     save(); go('summary');
   },
-  swapItem: (id) => { const alt = ALTERNATIVES[id]; S.cart.items[alt] = (S.cart.items[alt] || 0) + S.cart.items[id]; delete S.cart.items[id]; commit(); },
+  swapItem: (key) => { const alt = ALTERNATIVES[pkey(key).id]; S.cart.items[alt] = (S.cart.items[alt] || 0) + S.cart.items[key]; delete S.cart.items[key]; commit(); },
   placeOrder: () => {
     ensureCartDest();
     const items = cartItemsList();
     if (!items.length) { toast(T('Your order is empty.', 'طلبك فارغ.'), 'error'); return; }
     const btn = document.querySelector('[data-act="placeOrder"]');
-    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> ${T('Sending to kitchens…', 'جارٍ الإرسال للمطابخ…')}`; }
+    if (btn) { btn.disabled = true; btn.innerHTML = `${spinner()} ${T('Sending to kitchens…', 'جارٍ الإرسال للمطابخ…')}`; }
     setTimeout(() => {
       const fee = S.cart.type === 'delivery' ? 5 : 0;
-      const o = placeOrder({ items, type: S.cart.type, dest: S.cart.dest, schedule: S.cart.schedule });
+      const o = placeOrder({ items, type: S.cart.type, dest: S.cart.dest, schedule: S.cart.schedule, note: (S.cart.note || '').trim() });
       o.total += fee;
-      S.cart = { type: S.cart.type, items: {}, dest: S.cart.dest, schedule: 'now', combo: 0 };
+      S.cart = { type: S.cart.type, items: {}, dest: S.cart.dest, schedule: 'now', combo: 0, note: '' };
       save(); go('track/' + o.id);
       celebrate({ emoji: '✅', title: T('Order confirmed!', 'تم تأكيد الطلب!'), sub: T(`${o.id} · routed to ${o.tasks.length} kitchen(s)`, `${o.id} · موزّع على ${o.tasks.length} مطبخ`), kind: 'confetti', ms: 2200 });
     }, 700);
@@ -296,35 +333,12 @@ const A = {
   },
 
   // shop
-  merchInfo: (id) => openSheet(() => merchInfoSheet(id), { label: L(merch(id).name) }),
   lockedInfo: (id) => toast(`🔒 ${L(merch(id).name)} — ${specialState(merch(id))}`, 'info'),
-  pickSize: (s) => { S.size = s; renderSheet(); },
-  bagAdd: (id) => { S.bag[id] = (S.bag[id] || 0) + 1; save(); if (SHEET) renderSheet(); rerender(); if (!SHEET) toast(`${merch(id).emoji} ${T('Added to bag', 'أضيف للحقيبة')}`, 'success', 1800); },
-  bagRemove: (id) => { S.bag[id]--; if (!S.bag[id]) delete S.bag[id]; save(); renderSheet(); rerender(); },
-  openBag: () => openSheet(bagSheet, { label: T('Bag', 'الحقيبة') }),
-  bagMode: (m) => { S.bagMode = m; renderSheet(); },
-  checkout: () => {
-    const entries = Object.entries(S.bag);
-    const sub = entries.reduce((s, [id, q]) => s + merch(id).price * q, 0);
-    entries.forEach(([id]) => {
-      if (!S.trophies.some((t) => t.id === id)) S.trophies.push({ id, at: Date.now() });
-      S.purchases.push({ id, at: Date.now() });
-      S.season.history.unshift({ kind: 'merch', id, md: S.season.matchday, at: Date.now() });
-      if (['m3', 'x77', 'xstad'].includes(id)) S.quests.scarf = 1;
-    });
-    S.bag = {};
-    S.stadiumUnlock = clamp(S.stadiumUnlock + 5, 0, 100);
-    closeSheetSilently();
-    addPoints(Math.round(sub / 2), T('Club Shop purchase', 'شراء من المتجر'));
-    if (S.trophies.length >= 3) awardBadge('collector');
-    commit();
-    celebrate({ emoji: '🛍️', title: T('Purchase complete!', 'تم الشراء!'), sub: T('Digital twin added to your Trophy Cabinet.', 'أضيفت النسخة الرقمية إلى خزانة جوائزك.'), cta: { act: 'go', arg: 'profile', label: T('View cabinet', 'عرض الخزانة') }, ms: 3500 });
-  },
   mystery: () => {
     const box = document.querySelector('.mystery');
     box?.classList.add('shake');
     setTimeout(() => {
-      MYSTERY = pick(MERCH.filter((m) => !m.special && m.price >= 49)).id;
+      MYSTERY = pick(MERCH_ITEMS.filter((m) => !m.special && m.price >= 49)).id;
       if (!S.trophies.some((t) => t.id === MYSTERY)) S.trophies.push({ id: MYSTERY, at: Date.now() });
       if (MYSTERY === 'm3') S.quests.scarf = 1;
       commit(); toast(`🎁 ${T('Mystery Box', 'الصندوق الغامض')}: ${merch(MYSTERY).emoji} ${L(merch(MYSTERY).name)}`, 'success');
@@ -351,8 +365,8 @@ const A = {
   },
   bundleAdd: (id) => {
     const b = BUNDLES.find((x) => x.id === id);
-    b.items.forEach((x) => { if (x === 'combo') S.cart.combo = (S.cart.combo || 0) + 1; else if (merch(x)) S.bag[x] = (S.bag[x] || 0) + 1; else S.cart.items[x] = (S.cart.items[x] || 0) + 1; });
-    commit(); toast(T('Bundle added: merch to your bag, food to your order.', 'أضيفت الحزمة: المنتج للحقيبة والطعام للطلب.'), 'success');
+    b.items.forEach((x) => { if (x === 'combo') S.cart.combo = (S.cart.combo || 0) + 1; else { const k = merch(x)?.opts ? ckey(x, 'M') : x; S.cart.items[k] = (S.cart.items[k] || 0) + 1; } });
+    commit(); toast(`${T('Bundle added to your order', 'أضيفت الحزمة لطلبك')} · <a href="#/summary">${T('Review order', 'مراجعة الطلب')}</a>`, 'success');
   },
 
   // profile & settings
@@ -366,18 +380,34 @@ const A = {
   askResetAll: () => confirmSheet({ title: T('Reset all demo data?', 'مسح كل البيانات؟'), body: T('This permanently clears orders, points, badges, collectibles and preferences in this browser.', 'سيتم مسح الطلبات والنقاط والأوسمة والمقتنيات والتفضيلات نهائياً من هذا المتصفح.'), ok: T('Reset everything', 'مسح الكل'), danger: true, onOk: () => { resetState(); SETUP = null; dismissCelebrate(); DEMO_OPEN = false; MINI = { taps: 0, until: 0, done: false }; startSim(); go('home'); rerender(); toast(T('Demo data cleared.', 'تم مسح البيانات.'), 'success'); } }),
 
   // ops
-  opsTab: (t) => { OPS.tab = t; rerender(); },
-  opsGroup: (g) => { OPS.group = g; rerender(); },
+  opsFilter: (a) => { const [k, v] = a.split(':'); OPS.filters = { status: 'all', vendor: 'all', section: 'all', pickup: 'all', urgency: 'all', [k]: v }; go('ops/orders'); },
+  opsClearFilters: () => { OPS.filters = { status: 'all', vendor: 'all', section: 'all', pickup: 'all', urgency: 'all' }; rerender(); },
+  opsOpen: (id) => {
+    OPS.sel = id;
+    if (window.innerWidth < 1280 || route().arg !== 'orders') openSheet(() => (findOpsOrder(id) ? opsDetail(findOpsOrder(id)) : ''), { live: true, label: id });
+    rerender();
+  },
+  opsDist: (id) => { OPS.dist = id; rerender(); },
+  opsStockCat: (c) => { OPS.stockCat = c; rerender(); },
+  opsStock: (a) => {
+    const [id, d] = a.split(':');
+    S.stock[id] = Math.max(0, (S.stock[id] || 0) + +d);
+    if (S.stock[id] > 0 && S.soldOut.includes(id)) S.soldOut = S.soldOut.filter((x) => x !== id);
+    if (S.stock[id] === 0 && !S.soldOut.includes(id)) S.soldOut.push(id);
+    commit();
+  },
   opsAdvance: (id) => {
-    const o = S.orders.find((x) => x.id === id) || S.opsOrders.find((x) => x.id === id);
+    const o = findOpsOrder(id);
     const st = Math.min(...o.tasks.map((t) => t.st));
+    if (st >= 3) return;
+    toast(`${o.id} · ${OPS_STATUS()[Math.min(3, st + 1)]}`, 'success', 1800);
     if (st >= 2) { completeOrder(o); }
     else { o.tasks.forEach((t) => { if (t.st === st) { t.st++; t.t = t.st === 1 ? 3 : 3 + t.need; } }); const prev = o.status; o.status = Math.min(...o.tasks.map((t) => t.st)) >= 2 ? 2 : 1; if (!o.synthetic && prev !== o.status) onOrderStatus(o); }
     commit();
   },
   opsReroute: (a) => {
     const [oid, vid] = a.split(':');
-    const o = S.orders.find((x) => x.id === oid);
+    const o = findOpsOrder(oid);
     const t = o.tasks.find((x) => x.vid === vid);
     const cat = item(t.items[0].id).cat;
     const alt = VENDORS.filter((v) => v.id !== vid && v.cats.includes(cat)).sort((a, b) => S.vendorLoad[a.id] - S.vendorLoad[b.id])[0];
@@ -390,20 +420,27 @@ const A = {
     commit();
   },
   opsUnavailable: (id) => trigger('soldout', id),
-  opsRunner: (id) => { const o = S.orders.find((x) => x.id === id); o.runner = pick(RUNNERS.filter((r) => r !== o.runner)); addAlert('order', { en: `${id}: runner reassigned to ${o.runner}`, ar: `${id}: تعيين المندوب ${o.runner}` }); commit(); },
-  opsToggleStock: (id) => { if (S.soldOut.includes(id)) { S.soldOut = S.soldOut.filter((x) => x !== id); toast(T('Restocked', 'تمت إعادة التوفير'), 'success'); commit(); } else trigger('soldout', id); },
+  opsRunner: (id) => {
+    const o = findOpsOrder(id);
+    const busy = new Set(allOpsOrders().filter((x) => x.status < 3 && x.type === 'delivery').map((x) => x.runner));
+    o.runner = RUNNERS.find((r) => r !== o.runner && !busy.has(r)) || pick(RUNNERS.filter((r) => r !== o.runner));
+    addAlert('order', { en: `${id}: runner reassigned to ${o.runner}`, ar: `${id}: تعيين المندوب ${o.runner}` });
+    toast(T(`${id} reassigned to ${o.runner}`, `تم تعيين ${o.runner} للطلب ${id}`), 'success');
+    commit();
+  },
+  opsToggleStock: (id) => { if (S.soldOut.includes(id)) { S.soldOut = S.soldOut.filter((x) => x !== id); S.stock[id] = Math.max(S.stock[id] || 0, 40); toast(T('Restocked', 'تمت إعادة التوفير'), 'success'); commit(); } else trigger('soldout', id); },
 
   // partner
-  partnerTab: (t) => { PARTNER_TAB = t; rerender(); },
   draftImage: (e) => { draftOffer().image = e; rerender(); },
   draftMoment: (m) => { draftOffer().moment = m; rerender(); },
-  draftSection: (k) => { const d = draftOffer(); d.sections = d.sections.includes(k) ? d.sections.filter((x) => x !== k) : [...d.sections, k]; if (!d.sections.length) d.sections = [k]; rerender(); },
-  draftTone: (t) => { draftOffer().tone = t; rerender(); },
+  draftSection: (k) => { const d = draftOffer(); d.sections = d.sections.includes(k) ? d.sections.filter((x) => x !== k) : [...d.sections, k]; rerender(); },
+  draftSet: (a) => { const [k, v] = a.split(':'); draftOffer()[k] = v; rerender(); },
+  draftStep: (i) => { const d = draftOffer(); if (+i <= d.step) { d.step = +i; d.errors = {}; rerender(); } },
   previewOffer: (id) => {
     const of = S.offers.find((o) => o.id === id);
     openSheet(() => `<h2 class="sheet-title">${T('Fan preview', 'معاينة المشجع')}</h2><div class="phone"><div class="phone-in"><small class="muted">${sunMark(14, 'brand-sun')} ${T('Matchday Companion', 'رفيق المباراة')}</small>${offerCard(of, true)}</div></div>
       <p class="muted small mt">${offerLive(of) ? T('Live now for eligible sections.', 'مباشر الآن للأقسام المؤهلة.') : T('Will appear at:', 'سيظهر عند:') + ' ' + L(OFFER_MOMENTS.find((m) => m.id === of.moment).name)}</p>
-      <button class="btn btn-primary w-full" data-act="roleGo" data-arg="fan:home">${T('Open fan view', 'افتح واجهة المشجع')}</button>`, { label: T('Fan preview', 'معاينة المشجع') });
+      <button class="btn btn-primary w-full" data-act="roleGo" data-arg="fan:home">${T('Open fan view', 'افتح واجهة المشجع')}</button>`, { label: T('Fan preview', 'معاينة المشجع'), live: true });
   },
 
   trigger: (a) => { const [k, v] = a.split(':'); trigger(k, v); },
@@ -419,15 +456,18 @@ function placeOrderSilent(opts) {
 function closeSheetSilently() { SHEET = null; renderSheet(); }
 
 const INPUTS = {
-  draftTitle: (v) => { draftOffer().title = v; const pv = document.getElementById('offer-preview'); if (pv) pv.innerHTML = offerCard({ ...draftOffer(), title: { en: v || T('Your offer title', 'عنوان عرضك'), ar: v || 'عنوان عرضك' } }, true); },
-  draftDiscount: (v) => (draftOffer().discount = clamp(+v || 0, 0, 100)),
+  draftTitle: (v) => { draftOffer().title = v; refreshDraftPreview(); },
+  draftDiscount: (v) => { draftOffer().discount = clamp(+v || 0, 0, 100); const o = document.getElementById('disc-out'); if (o) o.textContent = v + '%'; refreshDraftPreview(); },
+  cartNote: (v) => { S.cart.note = v; save(); },
   draftMinute: (v) => (draftOffer().minute = clamp(+v || 1, 1, 90)),
   draftMinutes: (v) => { draftOffer().minutes = +v; const o = document.getElementById('minutes-out'); if (o) o.textContent = `${v} ${T('min', 'د')}`; },
 };
 const CHANGES = {
   setupRow: (v) => { setupDraft().row = +v; rerender(); },
   setupSeat: (v) => { setupDraft().seat = +v; rerender(); },
-  draftSponsor: (v) => (draftOffer().sponsor = v),
+  draftSponsor: (v) => { draftOffer().sponsor = v; refreshDraftPreview(); },
+  pickOpt: (v) => { SHEETOPT = v; renderSheet(); },
+  opsFilterSel: (v, el) => { OPS.filters[el.dataset.arg] = v; rerender(); },
   toggleVis: (v, el) => { S.visibility[el.dataset.arg] = el.checked; commit(); },
   toggleMotion: (v, el) => { S.reducedMotion = el.checked; commit(); },
   toggleClock: (v, el) => { S.match.clock = el.checked; commit(); },
@@ -447,24 +487,31 @@ const SUBMITS = {
     S.group = { code: code.startsWith('GB-') ? code : 'GB-' + code, leader: 'Faisal', me, members: ['Faisal', 'Noura', me], items: [{ id: 'b3', qty: 1, by: 'Faisal' }, { id: 'd4', qty: 2, by: 'Noura' }], type: 'pickup', dest: bestPickup().id, sim: true };
     commit(); toast(T("You joined Faisal's group.", 'انضممت لمجموعة فيصل.'), 'success');
   },
-  publishOffer: (form) => {
+  offerNext: () => {
     const d = draftOffer();
-    if (!d.title.trim()) { document.getElementById('offer-error').hidden = false; form.title.focus(); return; }
-    const of = { id: uid('of'), title: { en: d.title, ar: d.title }, sponsor: d.sponsor, image: d.image, moment: d.moment, minute: d.minute, sections: [...d.sections], minutes: d.minutes, discount: d.discount, item: { '🥤': 'd2', '🍔': 'b1', '🍟': 'f1', '☕': 'd3', '🍿': 's2' }[d.image] || 'd2', active: true, views: 0, redemptions: 0, orders: 0, tone: d.tone, endsAt: Date.now() + d.minutes * 60000, byMoment: {} };
+    if (!validateDraft(d)) { rerender(); document.querySelector('[aria-invalid="true"]')?.focus(); return; }
+    if (d.step < 3) { d.step++; rerender(); return; }
+    const of = seedOfferStats({ id: uid('of'), title: { en: d.title, ar: d.title }, sponsor: d.sponsor, image: d.image, moment: d.moment, minute: +d.minute, sections: [...d.sections], minutes: d.minutes,
+      discount: d.reward === 'free' ? 100 : +d.discount, item: IMAGE_ITEM[d.image] || 'd2', active: true, tone: d.tone, endsAt: d.moment === 'now' ? Date.now() + d.minutes * 60000 : null });
     S.offers.unshift(of);
     DRAFT = null;
-    commit();
-    openSheet(() => `<div class="center"><div class="celeb-emoji">📣</div><h2 class="sheet-title">${T('Offer scheduled', 'تمت جدولة العرض')}</h2>
-      <p class="muted">${offerLive(of) ? T('It is live now for eligible fans.', 'العرض مباشر الآن للمشجعين المؤهلين.') : T('It will appear in the Matchday Companion at:', 'سيظهر في رفيق المباراة عند:') + ' ' + L(OFFER_MOMENTS.find((m) => m.id === of.moment).name)}</p>
+    save(); go('partner/results');
+    setTimeout(() => openSheet(() => `<div class="center"><div class="celeb-mark">${sunMark(56, 'burst')}<span class="celeb-emoji">📣</span></div><h2 class="sheet-title">${T('Offer scheduled', 'تمت جدولة العرض')}</h2>
+      <p class="muted">${offerLive(of) ? T('It is live now for eligible fans.', 'العرض مباشر الآن للمشجعين المؤهلين.') : T('It will appear in the Matchday Companion at:', 'سيظهر في رفيق المباراة عند:') + ' ' + momentName(of.moment) + (of.moment === 'minute' ? ' ' + of.minute + "'" : '')}</p></div>
       ${offerCard(of, true)}
-      <div class="row gap mt"><button class="btn btn-primary grow" data-act="roleGo" data-arg="fan:home">${T('Preview as fan', 'معاينة كمشجع')}</button>${!offerLive(of) ? `<button class="btn btn-ghost grow" data-act="triggerOfferMoment" data-arg="${of.moment}">${T('Simulate moment', 'محاكاة اللحظة')}</button>` : ''}</div></div>`);
+      <div class="row gap mt wrap"><button class="btn btn-primary grow" data-act="roleGo" data-arg="fan:home">${T('Preview as fan', 'معاينة كمشجع')}</button>${!offerLive(of) ? `<button class="btn btn-ghost grow" data-act="triggerOfferMoment" data-arg="${of.moment}">${T('Simulate moment', 'محاكاة اللحظة')}</button>` : ''}</div>`, { live: true, label: T('Offer scheduled', 'تمت جدولة العرض') }), 60);
   },
 };
+function refreshDraftPreview() {
+  const pv = document.getElementById('offer-preview');
+  if (pv) pv.innerHTML = offerCard(previewOfferObj(draftOffer()), true);
+}
 A.triggerOfferMoment = (m) => {
   closeSheetSilently();
   if (m === 'goal') trigger('goal');
   else if (m === 'halftime') trigger('halftime');
   else if (m === 'prematch') trigger('phase', 'prematch');
+  else if (m === 'arrival') trigger('phase', 'arrival');
   else if (m === 'minute') { const of = S.offers[0]; setPhase(of.minute > 45 ? 'second' : 'kickoff'); S.match.minute = of.minute; commit(); }
 };
 
@@ -491,6 +538,7 @@ function renderDemo() {
       ${btn('trigger', 'closure', '🚧', S.closedRoutes.length ? T('Reopen route', 'فتح الممر') : T('Route closure', 'إغلاق ممر'))}
       ${btn('trigger', 'overload', '⚠️', T('Overload pickup', 'ازدحام الاستلام'))}
       ${btn('trigger', 'soldout', '📦', T('Item sold out', 'نفاد صنف'))}
+      ${btn('roleGo', 'operator:ops/orders', '🧾', T('Operator queue', 'طابور المشغّل'))}
       ${btn('askResetEvent', '', '🔄', T('Event reset', 'إعادة الحدث'))}
       ${btn('startTour', '', '✨', T('Product tour', 'جولة المنتج'))}
     </div>
@@ -509,13 +557,13 @@ const TOUR = [
   { t: { en: 'Fan places a pickup or delivery order', ar: 'المشجع يطلب استلاماً أو توصيلاً' }, b: { en: 'We added a burger, fries and a drink. Review and confirm.', ar: 'أضفنا برجر وبطاطس ومشروب. راجع وأكّد.' },
     run: () => { S.role = 'fan'; S.cart.items = { b1: 1, f2: 1, d4: 1 }; S.cart.type = 'pickup'; S.cart.dest = bestPickup().id; save(); go('summary'); } },
   { t: { en: 'Venue Operator receives and prepares it', ar: 'مشغّل المكان يستلم ويحضّر' }, b: { en: 'The order is split across vendors by stock, prep time, location and workload — one handoff for the fan.', ar: 'يتوزع الطلب على البائعين حسب المخزون ووقت التحضير والموقع والضغط — تسليم واحد للمشجع.' },
-    run: () => { if (!activeOrder()) { const items = [{ id: 'b1', qty: 1, by: 'me' }, { id: 'f2', qty: 1, by: 'me' }, { id: 'd4', qty: 1, by: 'me' }]; placeOrder({ items, type: 'pickup', dest: bestPickup().id }); S.cart.items = {}; } S.role = 'operator'; OPS.tab = 'network'; save(); go('home'); } },
+    run: () => { if (!activeOrder()) { const items = [{ id: 'b1', qty: 1, by: 'me' }, { id: 'f2', qty: 1, by: 'me' }, { id: 'd4', qty: 1, by: 'me' }]; placeOrder({ items, type: 'pickup', dest: bestPickup().id }); S.cart.items = {}; } S.role = 'operator'; OPS.dist = null; save(); go('ops/distribution'); } },
   { t: { en: 'A live event changes the experience', ar: 'حدث مباشر يغيّر التجربة' }, b: { en: 'A goal triggers celebrations, a goal-time offer, crowd surges and updated estimates.', ar: 'الهدف يطلق الاحتفال وعرض الهدف وارتفاع الكثافة وتحديث التقديرات.' },
     run: () => { S.role = 'fan'; go('home'); setTimeout(() => trigger('goal'), 400); } },
   { t: { en: 'Fan earns rewards and explores Club Shop', ar: 'المشجع يكسب المكافآت ويتصفح المتجر' }, b: { en: 'Points, badges and drops connect food, play and merchandise.', ar: 'النقاط والأوسمة والإصدارات تربط الطعام واللعب والمنتجات.' },
     run: () => { S.role = 'fan'; go('shop'); } },
   { t: { en: 'Club / Partner sees offers and engagement', ar: 'النادي/الشريك يرى العروض والتفاعل' }, b: { en: 'Create a matchday offer, preview it in the Companion and track simulated results.', ar: 'أنشئ عرضاً، عاينه في رفيق المباراة وتابع النتائج المحاكاة.' },
-    run: () => { S.role = 'partner'; PARTNER_TAB = 'results'; save(); go('home'); } },
+    run: () => { S.role = 'partner'; save(); go('partner/results'); } },
 ];
 function runTourStep() {
   const step = TOUR[S.tour];
@@ -567,7 +615,13 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('input', (e) => { const k = e.target.dataset?.input; if (k && INPUTS[k]) INPUTS[k](e.target.value, e.target); });
 document.addEventListener('change', (e) => { const k = e.target.dataset?.change; if (k && CHANGES[k]) CHANGES[k](e.target.value, e.target); });
 document.addEventListener('submit', (e) => { const k = e.target.dataset?.submit; if (k && SUBMITS[k]) { e.preventDefault(); SUBMITS[k](e.target); } });
-window.addEventListener('hashchange', () => { closeSheetSilently(); if (route().name !== 'map') MAPSTATE.route = MAPSTATE.route && false; rerender(); document.getElementById('main')?.focus({ preventScroll: true }); });
+window.addEventListener('hashchange', () => {
+  closeSheetSilently();
+  if (route().name !== 'map') MAPSTATE.route = false;
+  // a link into another role's workspace switches the role
+  if (route().name === 'ops' && S.role !== 'operator') S.role = 'operator';
+  if (route().name === 'partner' && S.role !== 'partner') S.role = 'partner';
+  rerender(); document.getElementById('main')?.focus({ preventScroll: true }); });
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change', rerender);
 
 /* ---------- boot ---------- */
