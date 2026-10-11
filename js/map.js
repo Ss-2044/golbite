@@ -14,6 +14,9 @@ function arcLine(a1, a2, rx = GEO.rx, ry = GEO.ry) {
 const HEAT = { calm: '#22A06B', mid: '#F5B94A', busy: '#E5484D' };
 const SECTION_SPANS = { A: [228, 312], B: [318, 42], C: [48, 132] };
 
+/* Stable small offset per order so overlapping markers stay put between ticks. */
+const jit = (id, k) => ((id.charCodeAt(3 + k) * 7 + id.charCodeAt(5) * 3) % 11) - 5;
+
 /* Where is the user's active order on the map right now? */
 function orderMarkerPos(o) {
   const v = vendor(o.tasks[0].vid);
@@ -123,6 +126,16 @@ function stadiumMap(opts = {}) {
     return out;
   };
   const ord = () => {
+    if (opts.ops) {
+      // operator view: every active order as a dot, deliveries with their route
+      return allOpsOrders().filter((x) => x.status < 3).map((x) => {
+        const mk = orderMarkerPos(x);
+        if (!mk) return '';
+        const late = needsAttention(x);
+        return `${mk.route ? `<path d="${polyPath(mk.route.pts)}" fill="none" stroke="var(--orange)" stroke-width="1.6" stroke-dasharray="2 3" opacity=".7"/>` : ''}
+          <circle cx="${(mk.p.x + jit(x.id, 0)).toFixed(1)}" cy="${(mk.p.y + jit(x.id, 1)).toFixed(1)}" r="${x.mine ? 5 : 3.6}" fill="${late ? 'var(--busy)' : 'var(--orange)'}" stroke="#fff" stroke-width="1.4"><title>${x.id}</title></circle>`;
+      }).join('');
+    }
     const o = opts.order !== false ? activeOrder() : null;
     const mk = o && orderMarkerPos(o);
     if (!mk) return '';

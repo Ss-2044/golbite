@@ -110,16 +110,46 @@ function estimate(order) {
   return prep + leg + queue;
 }
 function orderTotal(items) {
-  return items.reduce((s, it) => s + (it.price ?? item(it.id).price) * it.qty, 0);
+  return items.reduce((s, it) => s + (it.price ?? linePrice(it.id, it.opt)) * it.qty, 0);
 }
 
-function placeOrder({ items, type, dest, schedule = 'now', group = null }) {
+/* Operator timing: 2 simulation ticks = 1 minute, the same scale as the match clock. */
+const elapsedMin = (o) => Math.max(0, Math.round(((o.doneTick ?? S.simTick) - (o.bornTick ?? S.simTick)) / 2));
+const promisedMin = (o) => o.promised ?? 10;
+const isOverdue = (o) => o.status < 3 && elapsedMin(o) > promisedMin(o);
+const isBlocked = (o) => o.status < 3 && (!!o.issue || o.tasks.some((t) => t.hold));
+const needsAttention = (o) => isOverdue(o) || isBlocked(o);
+function orderOwner(o) {
+  if (o.status >= 3) return T('Fan', 'المشجع');
+  if (o.status === 2) return o.type === 'delivery' ? `${T('Runner', 'المندوب')} ${o.runner}` : `${T('Pickup desk', 'مكتب الاستلام')} ${pickup(o.dest)?.id || ''}`;
+  return o.tasks.map((t) => L(vendor(t.vid).name)).join(' + ');
+}
+function nextActionLabel(o) {
+  const st = Math.min(...o.tasks.map((t) => t.st));
+  return [T('Start preparing', 'ابدأ التحضير'), T('Mark ready', 'تحديد كجاهز'), o.type === 'delivery' ? T('Confirm delivered', 'تأكيد التسليم') : T('Hand over', 'تسليم الطلب'), null][Math.min(st, 3)];
+}
+function consumeStock(id, qty) {
+  if (S.stock[id] == null) return;
+  S.stock[id] = Math.max(0, S.stock[id] - qty);
+  if (S.stock[id] === 0 && !S.soldOut.includes(id)) {
+    S.soldOut.push(id);
+    addAlert('stock', { en: `${item(id).name.en} sold out`, ar: `نفد ${item(id).name.ar}` });
+  }
+}
+function countPlaced() { S.opsStats.byPhase[S.match.phase] = (S.opsStats.byPhase[S.match.phase] || 0) + 1; }
+
+function placeOrder({ items, type, dest, schedule = 'now', group = null, note = '' }) {
   const id = 'GB-' + (1000 + S.orders.length + Math.floor(Math.random() * 900));
   const voucher = S.vouchers.find((v) => items.some((i) => i.id === v.item));
   let discount = 0;
-  if (voucher) { discount = Math.round(item(voucher.item).price * (voucher.pct ?? 100)) / 100; S.vouchers = S.vouchers.filter((v) => v !== voucher); }
+  if (voucher) {
+    discount = Math.round(item(voucher.item).price * (voucher.pct ?? 100)) / 100;
+    S.vouchers = S.vouchers.filter((v) => v !== voucher);
+    const of = voucher.offer && S.offers.find((x) => x.id === voucher.offer);
+    if (of) of.m[S.match.phase].o++;
+  }
   const order = {
-    id, items, type, dest, schedule, group,
+    id, items, type, dest, schedule, group, note, bornTick: S.simTick, offer: voucher?.offer || null,
     tasks: routeItems(items, type === 'delivery' ? SECTIONS[dest].angle : pickup(dest).angle),
     status: 0, created: Date.now(), minute: S.match.minute, phase: S.match.phase,
     total: Math.max(0, orderTotal(items) - discount), discount,
@@ -128,7 +158,16 @@ function placeOrder({ items, type, dest, schedule = 'now', group = null }) {
     handoff: 0, eventId: currentEvent().id,
   };
   order.eta0 = estimate(order);
+  order.promised = Math.ceil(order.eta0) + 2;
   S.orders.unshift(order);
+  countPlaced();
+  items.forEach((i) => consumeStock(i.id, i.qty));
+  items.filter((i) => item(i.id).cat === 'merch').forEach((i) => {
+    if (!S.trophies.some((t) => t.id === i.id)) S.trophies.push({ id: i.id, at: Date.now() });
+    S.purchases.push({ id: i.id, at: Date.now(), order: id });
+    S.season.history.unshift({ kind: 'merch', id: i.id, md: S.season.matchday, at: Date.now() });
+    if (['m3', 'x77', 'xstad'].includes(i.id)) S.quests.scarf = 1;
+  });
   S.stadiumUnlock = clamp(S.stadiumUnlock + 3, 0, 100);
   order.tasks.forEach((t) => { S.vendorLoad[t.vid] = clamp(S.vendorLoad[t.vid] + 6, 0, 100); if (!S.season.vendorsTried.includes(t.vid)) S.season.vendorsTried.push(t.vid); });
   addAlert('order', { en: `New order ${id} split across ${order.tasks.length} vendor(s)`, ar: `طلب جديد ${id} موزّع على ${order.tasks.length} بائع` });
@@ -180,16 +219,20 @@ function makeOpsOrder() {
   const n = 1 + Math.floor(Math.random() * 3);
   const items = [];
   for (let i = 0; i < n; i++) {
-    const m = pick(MENU.filter((x) => !S.soldOut.includes(x.id)));
+    const pool = Math.random() < 0.12 ? MERCH_ITEMS.filter((x) => !x.special) : MENU;
+    const m = pick(pool.filter((x) => !S.soldOut.includes(x.id)));
     const ex = items.find((x) => x.id === m.id);
     ex ? ex.qty++ : items.push({ id: m.id, qty: 1, by: 'x' });
   }
   const type = Math.random() < 0.35 ? 'delivery' : 'pickup';
   const dest = type === 'delivery' ? pick(['A', 'B', 'C']) : pick(PICKUPS).id;
   const o = { id: 'GB-' + Math.floor(2000 + Math.random() * 7000), items, type, dest, fan: pick(FAKE_NAMES), status: 0, synthetic: true, handoff: 0,
-    runner: type === 'delivery' ? pick(RUNNERS) : null };
+    runner: type === 'delivery' ? pick(RUNNERS) : null, bornTick: S.simTick,
+    note: Math.random() < 0.25 ? pick([{ en: 'No ice please', ar: 'بدون ثلج لو سمحت' }, { en: 'Allergic to sesame', ar: 'عندي حساسية من السمسم' }, { en: 'Wheelchair seat, aisle side', ar: 'مقعد كرسي متحرك، جهة الممر' }]) : '' };
   o.tasks = routeItems(items, destAngle(o));
   o.total = orderTotal(items);
+  o.promised = Math.ceil(estimate(o)) + 2;
+  countPlaced();
   return o;
 }
 function seedOps() {
@@ -197,8 +240,11 @@ function seedOps() {
   for (let i = 0; i < 9; i++) {
     const o = makeOpsOrder();
     const st = i % 4;
-    o.tasks.forEach((t) => { t.st = Math.min(st, 2); t.t = st * 4; });
+    o.tasks.forEach((t) => { t.st = st === 3 ? 3 : Math.min(st, 2); t.t = st * 4; });
     o.status = st;
+    // back-date so the board opens with realistic elapsed times (one is running late)
+    o.bornTick = S.simTick - (st * 6 + 2 + (i === 5 ? 30 : 0));
+    if (st === 3) { o.doneTick = S.simTick; o.completedAt = Date.now(); S.opsStats.completed++; }
     S.opsOrders.push(o);
   }
 }
@@ -228,6 +274,8 @@ function completeOrder(o) {
   o.status = 3;
   o.tasks.forEach((t) => (t.st = 3));
   o.completedAt = Date.now();
+  o.doneTick = S.simTick;
+  S.opsStats.completed++;
   o.tasks.forEach((t) => (S.vendorLoad[t.vid] = clamp(S.vendorLoad[t.vid] - 5, 5, 100)));
   if (!o.synthetic) onOrderStatus(o);
 }
@@ -250,6 +298,7 @@ function startSim() {
 }
 function tick() {
   tickCount++;
+  S.simTick++;
   const m = S.match;
   // match clock
   if (m.clock && S.user && S.setup && tickCount % 2 === 0) {
@@ -293,13 +342,11 @@ function tick() {
   if (Math.random() < (halftime ? 0.35 : 0.15) && S.opsOrders.filter((o) => o.status < 3).length < 12) S.opsOrders.push(makeOpsOrder());
   // offers engagement
   S.offers.forEach((of) => {
-    if (!of.active) return;
-    const liveNow = offerLive(of);
-    of.views += Math.round(rand(liveNow ? 4 : 0, liveNow ? 14 : 2));
-    if (liveNow && Math.random() < 0.5) of.redemptions += 1;
-    if (liveNow && Math.random() < 0.35) of.orders += 1;
-    if (!of.byMoment) of.byMoment = {};
-    of.byMoment[m.phase] = (of.byMoment[m.phase] || 0) + (liveNow ? 1 : 0);
+    if (!of.active || !offerLive(of)) return;
+    const bucket = of.m[m.phase];
+    bucket.v += Math.round(rand(4, 14));
+    if (Math.random() < 0.5) { bucket.r++; const k = pick(of.sections); of.s[k] = (of.s[k] || 0) + 1; }
+    if (Math.random() < 0.35 && bucket.o < bucket.r) bucket.o++;
   });
   if (S.flash && S.flash.until <= Date.now()) S.flash = null;
   if (!S.flash && Math.random() < 0.01 && m.phase !== 'final') startFlash();
@@ -313,6 +360,7 @@ function offerLive(of) {
   if (!of.active) return false;
   switch (of.moment) {
     case 'now': return true;
+    case 'arrival': return m.phase === 'arrival' || (m.phase === 'prematch' && m.minute < -20);
     case 'prematch': return m.phase === 'arrival' || m.phase === 'prematch';
     case 'halftime': return m.phase === 'halftime';
     case 'goal': return m.lastGoalMinute != null && m.minute - m.lastGoalMinute <= (of.minutes || 5) && m.phase !== 'final';
@@ -461,6 +509,7 @@ function trigger(kind, arg) {
     case 'soldout': {
       const target = arg || activeOrder()?.items.find((i) => !S.soldOut.includes(i.id))?.id || 'b1';
       if (!S.soldOut.includes(target)) S.soldOut.push(target);
+      S.stock[target] = 0;
       addAlert('stock', { en: `${item(target).name.en} sold out — suggesting ${item(ALTERNATIVES[target]).name.en}`, ar: `نفد ${item(target).name.ar} — اقتراح ${item(ALTERNATIVES[target]).name.ar}` });
       toast(T(`${item(target).emoji} ${L(item(target).name)} just sold out. Try ${L(item(ALTERNATIVES[target]).name)}.`, `${item(target).emoji} نفد ${L(item(target).name)}. جرّب ${L(item(ALTERNATIVES[target]).name)}.`), 'warn', 5000);
       S.orders.filter((o) => o.status < 2 && o.items.some((i) => i.id === target)).forEach((o) => (o.issue = { kind: 'soldout', item: target }));
@@ -473,7 +522,9 @@ function trigger(kind, arg) {
       S.crowd = { A: 40, B: 30, C: 45, P1: 35, P2: 25, P3: 30 };
       S.prediction = null; S.quiz = { done: false, score: 0 };
       S.season.matchday++;
-      S.offers.forEach((o) => (o.byMoment = {}));
+      S.stock = defaultStock();
+      S.opsOrders = []; S.opsStats = { completed: 214, byPhase: { arrival: 58, prematch: 156 } };
+      S.alerts = [];
       toast(T(`Event reset — Matchday ${S.season.matchday} ready.`, `تمت إعادة الحدث — الجولة ${S.season.matchday} جاهزة.`), 'success');
       break;
   }
