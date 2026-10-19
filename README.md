@@ -9,15 +9,25 @@ It runs fully in the browser with simulated demo data. No real login, payment, m
 - **As an installable app (PWA, offline):** serve the folder over HTTP, for example
   `python3 -m http.server 8080` then open <http://localhost:8080>. You can then "Add to Home Screen".
 
-## Roles
+## Roles (demo role switch — not access control)
 
 | Role | Where | Purpose |
 | --- | --- | --- |
-| Fan (default) | `#/home`, `#/menu`, `#/orders`, `#/play`, `#/shop`, `#/profile` | Matchday Companion, ordering food and club merchandise, tracking, rewards |
-| Venue Operator | `#/ops/overview`, `orders`, `distribution`, `inventory`, `map` | Venue Control Center: queue with filters and detail panel, vendor/runner routing, stock and pickup capacity, map operations |
-| Club / Partner | `#/partner/results`, `#/partner/create` | Campaign results (one consistent dataset) and a guided offer builder with live fan preview |
+| Fan (default) | `#/home`, `#/explore`, `#/guide`, `#/menu`, `#/summary`, `#/track/:id`, `#/support`, `#/play`, `#/profile` | Event guide (before / arrival / leaving), searchable venue directory and map, menu with search, dietary and allergen filters, checkout with VAT/fees, order tracking, support and service recovery |
+| Operator | `#/ops/overview`, `control`, `orders`, `distribution`, `inventory`, `facilities`, `map` | Event-day controls (open/close ordering, pause vendor/pickup/zone, capacity, cutoff, phase incl. cancelled, official notice), orders with valid next actions, stock, facility tasks and service status, activity log |
+| Vendor | `#/vendor/queue`, `menu`, `settings`, `performance` | One kitchen's queue (accept, start, ready, reject), stock, capacity and pause, performance |
+| Partner | `#/partner/results`, `#/partner/create` | Campaigns with status, eligible products, redemption limit, pause/edit/end, preview and metric definitions (simulated) |
+| Venue admin | `#/admin/setup`, `services`, `integrations`, `report`, `activity` | Event setup with a validation checklist and publish, directory status, integration boundaries, business report (no payouts) |
 
-All three share one state: a fan order appears in the operator queue, operator status changes update the fan's tracking, and partner offers appear in the fan's Companion and feed the campaign analytics.
+The role switch is for reviewers only. A production system must authenticate users and enforce every role on the server.
+
+## What is simulated
+
+Everything: events, menus, prices, stock, orders, waits, maps, match feed, campaign results and payments. Labels (`Demo`, `Scheduled`, `Unavailable`) say where each piece of information comes from. No card data is collected and no money moves. See `js/services.js` for the integration boundaries production needs: authentication, ticketing, venue maps, access control, POS/inventory, payments and refunds, parking, transport, match feed, notifications, support desk and analytics.
+
+## Order lifecycle
+
+Pickup: Placed → Accepted → Preparing → Ready → Collected. Seat delivery: … Ready → On the way → Delivered. Any stage before completion can be Cancelled. `setStage()` in `js/engine.js` only allows the next stage, and every change is logged with the acting role. Demo Controls can run scenarios (pre-match, busy pickup, vendor pause, goal offer, halftime rush, delayed order, vendor rejects, item unavailable, facility unavailable), advance orders and toggle autopilot.
 
 ## Design system
 

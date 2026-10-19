@@ -27,6 +27,14 @@ function viewPlay() {
   return `<section class="page">
     <h1 class="title">${T('Play', 'العب')}</h1>
     <p class="muted">${T('Optional matchday games. All scores, points and prizes are simulated demo data.', 'ألعاب اختيارية. كل النتائج والنقاط والجوائز بيانات تجريبية.')}</p>
+    <details class="more filters-box"><summary>${icon('help')} ${T('Game rules', 'قواعد الألعاب')} ${dataBadge('demo')} ${icon('down')}</summary>
+      <ul class="rules">
+        <li>${T('Points are demo points with no cash value. They cannot be exchanged, transferred or redeemed for real prizes.', 'النقاط تجريبية بلا قيمة نقدية، ولا يمكن استبدالها أو تحويلها أو صرفها بجوائز حقيقية.')}</li>
+        <li>${T('Predictions lock before the result is known and are scored at the final whistle (simulated match feed).', 'التوقعات تُثبّت قبل معرفة النتيجة وتُحسب عند صافرة النهاية (بيانات مباراة محاكاة).')}</li>
+        <li>${T('Quiz: 3 questions, one answer each, 100 demo points per correct answer.', 'المسابقة: 3 أسئلة، إجابة واحدة لكل سؤال، 100 نقطة تجريبية لكل إجابة صحيحة.')}</li>
+        <li>${T('Prize draws and lucky-seat games are illustrations only — no real prizes are awarded in this demo.', 'السحوبات وألعاب المقعد المحظوظ للتوضيح فقط — لا تُمنح جوائز حقيقية في هذا العرض.')}</li>
+        <li>${T('Leaderboards show sample fans.', 'لوحات الصدارة تعرض مشجعين نموذجيين.')}</li>
+      </ul></details>
     <div class="card">${tierBar()}<div class="row gap wrap mt-s">${S.badges.map((b) => `<span class="badge-chip" title="${esc(L(BADGES[b].name))}">${BADGES[b].emoji} ${L(BADGES[b].name)}</span>`).join('') || `<small class="muted">${T('Earn badges by ordering, playing and attending.', 'اكسب الأوسمة بالطلب واللعب والحضور.')}</small>`}</div></div>
 
     <div class="play-grid mt">

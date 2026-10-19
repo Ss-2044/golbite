@@ -42,7 +42,7 @@ function scheduleReadyAlert(o) {
   if (!NATIVE) return;
   ensureNotifyPermission().then((ok) => {
     if (!ok) return;
-    const ticks = 3 + Math.max(...o.tasks.map((t) => t.need)) + (o.schedule === 'halftime' ? 40 : 0);
+    const ticks = 3 + Math.max(...o.tasks.map((tk) => tk.need)) + (o.schedule === 'halftime' ? 40 : 0);
     const at = Date.now() + (ticks * 1000) / S.simSpeed;
     const [title, body] = readyText(o);
     nativeNotify(title, body, o.id + ':ready', at);
@@ -56,8 +56,8 @@ function readyText(o) {
 /* Called by the engine when an order changes status while the app is open. */
 function nativeOrderStatus(o) {
   if (!NATIVE) return;
-  if (o.status === 2) { nativeCancel(o.id + ':ready'); nativeNotify(...readyText(o), o.id + ':now'); haptic('success'); }
-  if (o.status === 3) nativeCancel(o.id + ':ready');
+  if (o.stage === 'ready' || o.stage === 'dispatched') { nativeCancel(o.id + ':ready'); nativeNotify(...readyText(o), o.id + ':' + o.stage); haptic('success'); }
+  if (isFinal(o)) nativeCancel(o.id + ':ready');
 }
 
 function haptic(kind = 'light') {

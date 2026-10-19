@@ -102,10 +102,11 @@ function profileSeason() {
 
 function profileOrders() {
   if (!S.orders.length) return `<div class="empty panel">${foodTile('🧾', 'xl')}<b>${T('No orders yet', 'لا توجد طلبات بعد')}</b><button class="btn btn-orange" data-act="go" data-arg="menu">${T('Start an order', 'ابدأ طلباً')}</button></div>`;
-  const spent = S.orders.reduce((s, o) => s + o.total, 0);
+  const spent = S.orders.filter((o) => o.stage !== 'cancelled').reduce((s, o) => s + o.total - (o.refund || 0), 0);
   return `<section class="panel">
-    <div class="block-head"><h2 class="h3">${T('Order history', 'سجل الطلبات')}</h2><span class="muted small">${S.orders.length} · ${sar(spent)}</span></div>
-    ${S.orders.map((o) => `<button class="kv kv-btn" data-act="go" data-arg="track/${o.id}"><span>${o.items.slice(0, 3).map((i) => item(i.id).emoji).join('')} <b>${o.id}</b> <small class="muted">${L(EVENTS.find((e) => e.id === o.eventId)?.title)}</small></span><span class="row gap-xs"><span class="status-chip sm st-${o.status}">${statusLabels(o)[o.status]}</span><b>${sar(o.total)}</b></span></button>`).join('')}
+    <div class="block-head"><h2 class="h3">${T('Orders & receipts', 'الطلبات والإيصالات')}</h2><span class="muted small">${S.orders.length} · ${sar(spent)} ${dataBadge('demo')}</span></div>
+    <p class="muted xs">${T('Demo receipts — no payment was taken. Open an order to see its itemised receipt.', 'إيصالات تجريبية — لم يتم أي دفع. افتح الطلب لعرض الإيصال المفصل.')}</p>
+    ${S.orders.map((o) => `<button class="kv kv-btn" data-act="go" data-arg="track/${o.id}"><span>${o.items.slice(0, 3).map((i) => item(i.id).emoji).join('')} <b>${o.id}</b> <small class="muted">${L(EVENTS.find((e) => e.id === o.eventId)?.title)}</small></span><span class="row gap-xs"><span class="status-chip sm st-${o.status}">${stageLabel(o.stage)}</span><b>${sar(o.total - (o.refund || 0))}</b></span></button>`).join('')}
   </section>`;
 }
 
@@ -114,9 +115,15 @@ function profilePrivacy() {
   return `<div class="profile-grid">
     <section class="panel"><h2 class="h3">${icon('eye')} ${T('What others see (demo)', 'ما يراه الآخرون (تجريبي)')}</h2>
       ${[['name', T('Show my name', 'إظهار اسمي')], ['section', T('Show my seat', 'إظهار مقعدي')], ['badges', T('Show badges', 'إظهار الأوسمة')], ['collectibles', T('Show collectibles', 'إظهار المقتنيات')], ['predictions', T('Show predictions', 'إظهار التوقعات')]].map(([k, l]) => toggleRow(l, v[k], 'toggleVis', k)).join('')}</section>
+    <section class="panel"><h2 class="h3">${icon('lock')} ${T('Saved on this device', 'محفوظ على هذا الجهاز')}</h2>
+      <p class="muted small">${T('GolBite only keeps what each feature needs, in this browser. Nothing is sent to a server in this demo.', 'يحفظ GolBite ما تحتاجه كل ميزة فقط في هذا المتصفح. لا يُرسل شيء لأي خادم في هذا العرض.')}</p>
+      <label class="toggle-row"><span>${T('Remember my seat', 'تذكّر مقعدي')}</span><input type="checkbox" role="switch" ${S.prefs.saveSeat ? 'checked' : ''} data-change="prefSaveSeat"/><i class="switch" aria-hidden="true"></i></label>
+      <div class="kv"><span>${T('Saved parking location', 'موقع الموقف المحفوظ')}</span>${S.savedCar ? `<button class="btn btn-ghost btn-sm" data-act="clearCar">${T('Delete', 'حذف')}</button>` : `<b class="muted">${T('None', 'لا يوجد')}</b>`}</div>
+      <div class="kv"><span>${T('Location permission', 'إذن الموقع')}</span><b class="muted">${T('Only requested if you tap “Detect my location” in setup', 'يُطلب فقط إذا ضغطت "حدد موقعي" في الإعداد')}</b></div>
+      <div class="kv"><span>${T('Support requests', 'طلبات الدعم')}</span>${S.support.length ? `<button class="btn btn-ghost btn-sm" data-act="clearSupport">${T('Delete', 'حذف')} (${S.support.length})</button>` : `<b class="muted">${T('None', 'لا يوجد')}</b>`}</div></section>
     <section class="panel"><h2 class="h3">${icon('settings')} ${T('App', 'التطبيق')}</h2>
       <p class="muted small">${T('Language, event, simulation speed, motion and reset live in Settings.', 'اللغة والحدث وسرعة المحاكاة والحركة وإعادة الضبط في الإعدادات.')}</p>
-      <div class="row gap mt-s wrap"><button class="btn btn-ghost" data-act="go" data-arg="settings">${icon('settings')} ${T('Open settings', 'افتح الإعدادات')}</button><button class="btn btn-ghost" data-act="signOut">${icon('logout', 'flip')} ${T('Sign out', 'تسجيل الخروج')}</button></div></section>
+      <div class="row gap mt-s wrap"><button class="btn btn-ghost" data-act="go" data-arg="settings">${icon('settings')} ${T('Open settings', 'افتح الإعدادات')}</button><button class="btn btn-ghost" data-act="go" data-arg="support">${icon('help')} ${T('Help & support', 'المساعدة والدعم')}</button><button class="btn btn-ghost" data-act="signOut">${icon('logout', 'flip')} ${T('Sign out', 'تسجيل الخروج')}</button></div></section>
   </div>`;
 }
 
@@ -153,6 +160,6 @@ function viewSettings() {
       <p class="muted small">${T('Reset the event to start the match again, or clear all demo data stored in this browser.', 'أعد ضبط الحدث لبدء المباراة من جديد، أو امسح كل البيانات التجريبية المحفوظة في هذا المتصفح.')}</p>
       <div class="row gap wrap mt-s"><button class="btn btn-ghost" data-act="askResetEvent">${T('Reset event', 'إعادة الحدث')}</button><button class="btn btn-danger" data-act="askResetAll">${T('Clear all demo data', 'مسح كل البيانات')}</button></div>
     </section>
-    <p class="muted xs center">GolBite ${T('demo prototype', 'نموذج تجريبي')} · v1.1 · ${T('All match, order and campaign figures are simulated.', 'كل أرقام المباريات والطلبات والحملات محاكاة.')}</p>
+    <p class="muted xs center">GolBite ${T('demo prototype', 'نموذج تجريبي')} · v2.0 · ${T('All match, order and campaign figures are simulated.', 'كل أرقام المباريات والطلبات والحملات محاكاة.')}</p>
   </section>`;
 }
