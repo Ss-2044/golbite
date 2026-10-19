@@ -79,7 +79,8 @@ function routeItems(items, dAngle) {
   const tasks = {};
   items.forEach((it) => {
     const m = item(it.id);
-    const cands = VENDORS.filter((v) => v.cats.includes(m.cat));
+    let cands = VENDORS.filter((v) => v.cats.includes(m.cat) && !S.ops.pausedVendors.includes(v.id));
+    if (!cands.length) cands = VENDORS.filter((v) => v.cats.includes(m.cat));
     let best = null;
     cands.forEach((v) => {
       const load = S.vendorLoad[v.id];
@@ -88,9 +89,9 @@ function routeItems(items, dAngle) {
       const reason = dist < 50 ? 'near' : load < 35 ? 'load' : 'stock';
       if (!best || score < best.score) best = { v, score, reason };
     });
-    const t = (tasks[best.v.id] ||= { vid: best.v.id, items: [], st: 0, t: 0, need: 0, reason: best.reason });
+    const t = (tasks[best.v.id] ||= { vid: best.v.id, items: [], st: 0, acc: false, prog: 0, need: 0, reason: best.reason });
     t.items.push({ ...it });
-    t.need = Math.max(t.need, m.prep + Math.round(S.vendorLoad[best.v.id] / 15));
+    t.need = Math.max(t.need, m.prep * 2 + Math.round(activeTasks(best.v.id) / Math.max(1, vendorCap(best.v.id)) * 4));
   });
   return Object.values(tasks);
 }
@@ -101,32 +102,161 @@ const REASONS = {
 };
 const RUNNERS = ['Ahmed', 'Yousef', 'Saad', 'Nasser', 'Bandar'];
 
+/* ---------- capacity & availability (event-day rules) ---------- */
+const vendorCap = (vid) => S.venueCfg.capacity[vid] || 10;
+function activeTasks(vid) {
+  let n = 0;
+  [...S.orders, ...S.opsOrders].forEach((o) => { if (!isFinal(o)) o.tasks.forEach((t) => { if (t.vid === vid && t.st < 2 && !t.rejected) n++; }); });
+  return n;
+}
+const vendorPaused = (vid) => S.ops.pausedVendors.includes(vid);
+function eventStatus() {
+  if (S.ops.cancelled) return 'cancelled';
+  return { arrival: 'scheduled', prematch: 'scheduled', kickoff: 'live', halftime: 'halftime', second: 'live', final: 'post' }[S.match.phase];
+}
+/* Can fans place food orders right now? Returns { open, reason }. */
+function orderingStatus() {
+  const cfg = S.venueCfg, ops = S.ops, m = S.match;
+  if (ops.cancelled) return { open: false, reason: T('The event has been cancelled.', 'تم إلغاء الفعالية.') };
+  if (!cfg.published) return { open: false, reason: T('The venue has not opened this event for orders yet.', 'لم يفتح الملعب هذه الفعالية للطلب بعد.') };
+  if (!ops.ordering) return { open: false, reason: t('err.orderingClosed') };
+  if (m.phase === 'final') return { open: false, reason: T('Ordering has closed for this event.', 'انتهى وقت الطلب لهذه الفعالية.') };
+  if (m.phase === 'second' && m.minute >= cfg.cutoffMinute) return { open: false, reason: T(`Last orders were at ${cfg.cutoffMinute}'.`, `آخر موعد للطلب كان الدقيقة ${cfg.cutoffMinute}.`) };
+  return { open: true, reason: '' };
+}
+const pickupAllowed = (pid) => S.venueCfg.fulfillment.pickup && !S.ops.pausedPickups.includes(pid);
+const deliveryAllowed = (sec) => S.venueCfg.fulfillment.delivery && S.venueCfg.deliverySections.includes(sec) && !S.ops.pausedZones.includes(sec);
+function itemAvailable(id) {
+  const m = item(id);
+  if (!m || S.soldOut.includes(id) || S.stock[id] === 0) return false;
+  return VENDORS.some((v) => v.cats.includes(m.cat) && !vendorPaused(v.id));
+}
+
+/* ---------- order lifecycle: one state machine for fan, operator and vendor ---------- */
+const FLOW = {
+  pickup: ['placed', 'accepted', 'preparing', 'ready', 'collected'],
+  delivery: ['placed', 'accepted', 'preparing', 'ready', 'dispatched', 'delivered'],
+};
+const STATUS_OF = { placed: 0, accepted: 0, preparing: 1, ready: 2, dispatched: 2, delivered: 3, collected: 3, cancelled: 3 };
+const flowOf = (o) => FLOW[o.type];
+const isFinal = (o) => ['collected', 'delivered', 'cancelled'].includes(o.stage);
+function nextStage(o) { const f = flowOf(o); const i = f.indexOf(o.stage); return i >= 0 && i < f.length - 1 ? f[i + 1] : null; }
+const stageLabel = (st) => t('st.' + st);
+const actorLabel = (a) => (a === 'sim' ? t('role.sim') : t('role.' + a));
+const TASK_LABEL = (tk) => (tk.rejected ? t('vt.rejected') : tk.st >= 3 ? t('vt.handed') : tk.st === 2 ? t('vt.ready') : tk.st === 1 ? t('vt.preparing') : tk.acc ? t('vt.accepted') : t('vt.new'));
+
+function logActivity(role, text) {
+  S.activity.unshift({ at: Date.now(), minute: S.match.minute, role, text });
+  S.activity = S.activity.slice(0, 80);
+}
+
+/* Move an order to `stage`. Only the next stage in its flow (or cancellation) is allowed. */
+function setStage(o, stage, actor = 'sim', note = '') {
+  const ok = stage === nextStage(o) || (stage === 'cancelled' && !isFinal(o));
+  if (!ok) return false;
+  o.stage = stage;
+  o.status = STATUS_OF[stage];
+  o.stageTick = S.simTick;
+  o.history = o.history || [];
+  o.history.push({ stage, tick: S.simTick, minute: S.match.minute, by: actor, note });
+  if (stage === 'accepted') o.tasks.forEach((tk) => (tk.acc = true));
+  if (stage === 'preparing') o.tasks.forEach((tk) => { tk.acc = true; tk.st = Math.max(tk.st, 1); });
+  if (stage === 'ready') o.tasks.forEach((tk) => (tk.st = Math.max(tk.st, 2)));
+  if (['dispatched', 'collected', 'delivered'].includes(stage)) o.tasks.forEach((tk) => (tk.st = 3));
+  if (isFinal(o)) {
+    o.doneTick = S.simTick; o.completedAt = Date.now();
+    if (stage === 'cancelled') S.opsStats.cancelled = (S.opsStats.cancelled || 0) + 1; else S.opsStats.completed++;
+    recordLedger(o);
+  }
+  if (!o.synthetic || actor !== 'sim') logActivity(actor, `${o.id} → ${stageLabel(stage)}${note ? ' · ' + note : ''}`);
+  if (!o.synthetic) onOrderStatus(o);
+  return true;
+}
+/* Closed orders are written to a simple ledger used by the business report (simulated amounts; no payouts). */
+function recordLedger(o) {
+  if (!S.ledger) S.ledger = [];
+  if (S.ledger.some((x) => x.id === o.id)) return;
+  const byVendor = {};
+  o.tasks.forEach((tk) => { if (!tk.rejected) byVendor[tk.vid] = (byVendor[tk.vid] || 0) + orderTotal(tk.items); });
+  const gross = Object.values(byVendor).reduce((a, b) => a + b, 0);
+  const discount = o.discount || 0;
+  const fees = (o.fee || 0) + (o.service || 0);
+  const refund = o.stage === 'cancelled' ? gross - discount + fees : o.refund || 0;
+  S.ledger.unshift({ id: o.id, stage: o.stage, synthetic: !!o.synthetic, phase: o.phase || S.match.phase, gross, discount, fees, refund, byVendor, at: Date.now() });
+  S.ledger = S.ledger.slice(0, 400);
+}
+/* Order-level "next step" used by operator screens. */
+function advanceOrder(o, actor) { const n = nextStage(o); return n ? setStage(o, n, actor) : false; }
+function nextActionLabel(o) {
+  const n = nextStage(o);
+  return n ? t({ accepted: 'act.accept', preparing: 'act.start', ready: 'act.ready', collected: 'act.collect', dispatched: 'act.dispatch', delivered: 'act.deliver' }[n]) : null;
+}
+
+/* Vendor-level actions. The order stage follows its vendor tasks. */
+function vendorAction(o, vid, action, actor = 'vendor') {
+  const tk = o.tasks.find((x) => x.vid === vid);
+  if (!tk || isFinal(o)) return false;
+  if (action === 'accept' && !tk.acc) tk.acc = true;
+  else if (action === 'start' && tk.acc && tk.st === 0) tk.st = 1;
+  else if (action === 'ready' && tk.st === 1) { tk.st = 2; tk.prog = tk.need; }
+  else if (action === 'reject' && tk.st < 2) {
+    tk.rejected = true;
+    o.issue = { kind: 'rejected', vid };
+    logActivity(actor, `${o.id}: ${L(vendor(vid).name)} ${T('cannot fulfil', 'لا يستطيع التنفيذ')}`);
+    if (!o.synthetic) toast(T(`${L(vendor(vid).name)} can't complete part of ${o.id}. Choose what to do in your order.`, `${L(vendor(vid).name)} لا يستطيع إكمال جزء من ${o.id}. اختر الإجراء من صفحة الطلب.`), 'warn', 5000);
+    return true;
+  } else return false;
+  logActivity(actor, `${o.id}: ${L(vendor(vid).name)} → ${TASK_LABEL(tk)}`);
+  syncFromTasks(o, actor);
+  return true;
+}
+function syncFromTasks(o, actor) {
+  const live = o.tasks.filter((x) => !x.rejected);
+  if (!live.length) return;
+  if (o.stage === 'placed' && live.every((x) => x.acc)) setStage(o, 'accepted', actor);
+  if (o.stage === 'accepted' && live.some((x) => x.st >= 1)) setStage(o, 'preparing', actor);
+  if (o.stage === 'preparing' && live.every((x) => x.st >= 2)) setStage(o, 'ready', actor);
+}
+function cancelOrder(o, actor, note) { return setStage(o, 'cancelled', actor, note); }
+
+/* ---------- deterministic estimates ---------- */
+function vendorQueueMin(vid) { return (activeTasks(vid) / Math.max(1, vendorCap(vid))) * 4; }
 function estimate(order) {
-  const prep = Math.max(...order.tasks.map((t) => (t.st >= 2 ? 0 : Math.max(1, t.need + 3 - t.t) / 2)));
+  if (isFinal(order)) return 0;
   const leg = order.type === 'delivery' ? walkMins(planRoute(vendor(order.tasks[0].vid).angle, destAngle(order)).len, order.dest) : 0;
-  const queue = order.type === 'pickup' ? pickupWait(order.dest) * 0.4 : 0;
-  if (order.status >= 3) return 0;
-  if (order.status === 2) return order.type === 'delivery' ? Math.max(1, leg * (1 - (order.handoff || 0) / 10)) : 1;
-  return prep + leg + queue;
+  const st = order.stage || 'placed';
+  if (st === 'dispatched') return Math.max(1, leg * (1 - Math.min(1, (S.simTick - order.stageTick) / 8)));
+  if (st === 'ready') return order.type === 'delivery' ? leg + 1 : 1;
+  const prep = Math.max(...order.tasks.filter((x) => !x.rejected).map((x) => (x.st >= 2 ? 0 : Math.max(1, x.need - (x.prog || 0)) / 2 + (x.acc ? 0 : 1) + (vendorPaused(x.vid) ? 5 : vendorQueueMin(x.vid)))), 0);
+  const queue = order.type === 'pickup' ? pickupWait(order.dest) * 0.3 : 0;
+  return prep + leg + queue + (order.delay || 0) / 2;
 }
 function orderTotal(items) {
   return items.reduce((s, it) => s + (it.price ?? linePrice(it.id, it.opt)) * it.qty, 0);
+}
+/* Price breakdown. Menu prices include VAT; the VAT share is shown for transparency. */
+function priceBreakdown(items, type, discount = 0) {
+  const subtotal = orderTotal(items);
+  const fee = type === 'delivery' ? S.venueCfg.deliveryFee : 0;
+  const service = S.venueCfg.serviceFee || 0;
+  const total = Math.max(0, subtotal + fee + service - discount);
+  const vat = Math.round((total - total / (1 + S.venueCfg.vatRate)) * 100) / 100;
+  return { subtotal, fee, service, discount, total, vat };
 }
 
 /* Operator timing: 2 simulation ticks = 1 minute, the same scale as the match clock. */
 const elapsedMin = (o) => Math.max(0, Math.round(((o.doneTick ?? S.simTick) - (o.bornTick ?? S.simTick)) / 2));
 const promisedMin = (o) => o.promised ?? 10;
-const isOverdue = (o) => o.status < 3 && elapsedMin(o) > promisedMin(o);
-const isBlocked = (o) => o.status < 3 && (!!o.issue || o.tasks.some((t) => t.hold));
-const needsAttention = (o) => isOverdue(o) || isBlocked(o);
+const isOverdue = (o) => !isFinal(o) && elapsedMin(o) > promisedMin(o);
+const isBlocked = (o) => !isFinal(o) && (!!o.issue || o.tasks.some((x) => vendorPaused(x.vid) && x.st < 2));
+const isUnassigned = (o) => !isFinal(o) && o.type === 'delivery' && ['ready', 'dispatched'].includes(o.stage) && !o.runner;
+const needsAttention = (o) => isOverdue(o) || isBlocked(o) || isUnassigned(o);
 function orderOwner(o) {
-  if (o.status >= 3) return T('Fan', 'المشجع');
-  if (o.status === 2) return o.type === 'delivery' ? `${T('Runner', 'المندوب')} ${o.runner}` : `${T('Pickup desk', 'مكتب الاستلام')} ${pickup(o.dest)?.id || ''}`;
-  return o.tasks.map((t) => L(vendor(t.vid).name)).join(' + ');
-}
-function nextActionLabel(o) {
-  const st = Math.min(...o.tasks.map((t) => t.st));
-  return [T('Start preparing', 'ابدأ التحضير'), T('Mark ready', 'تحديد كجاهز'), o.type === 'delivery' ? T('Confirm delivered', 'تأكيد التسليم') : T('Hand over', 'تسليم الطلب'), null][Math.min(st, 3)];
+  if (o.stage === 'cancelled') return '—';
+  if (isFinal(o)) return T('Fan', 'المشجع');
+  if (o.stage === 'dispatched' || (o.stage === 'ready' && o.type === 'delivery')) return o.runner ? `${T('Runner', 'المندوب')} ${o.runner}` : T('Unassigned', 'غير مُسند');
+  if (o.stage === 'ready') return `${T('Pickup desk', 'مكتب الاستلام')} ${pickup(o.dest)?.id || ''}`;
+  return o.tasks.filter((x) => !x.rejected).map((x) => L(vendor(x.vid).name)).join(' + ');
 }
 function consumeStock(id, qty) {
   if (S.stock[id] == null) return;
@@ -139,7 +269,7 @@ function consumeStock(id, qty) {
 function countPlaced() { S.opsStats.byPhase[S.match.phase] = (S.opsStats.byPhase[S.match.phase] || 0) + 1; }
 
 function placeOrder({ items, type, dest, schedule = 'now', group = null, note = '' }) {
-  const id = 'GB-' + (1000 + S.orders.length + Math.floor(Math.random() * 900));
+  const id = 'GB-' + (1000 + S.orders.length * 7 + Math.floor(srand() * 900));
   const voucher = S.vouchers.find((v) => items.some((i) => i.id === v.item));
   let discount = 0;
   if (voucher) {
@@ -148,32 +278,35 @@ function placeOrder({ items, type, dest, schedule = 'now', group = null, note = 
     const of = voucher.offer && S.offers.find((x) => x.id === voucher.offer);
     if (of) of.m[S.match.phase].o++;
   }
+  const pb = priceBreakdown(items, type, discount);
   const order = {
     id, items, type, dest, schedule, group, note, bornTick: S.simTick, offer: voucher?.offer || null,
     tasks: routeItems(items, type === 'delivery' ? SECTIONS[dest].angle : pickup(dest).angle),
-    status: 0, created: Date.now(), minute: S.match.minute, phase: S.match.phase,
-    total: Math.max(0, orderTotal(items) - discount), discount,
-    runner: type === 'delivery' ? pick(RUNNERS) : null,
-    code: String(Math.floor(100 + Math.random() * 900)),
-    handoff: 0, eventId: currentEvent().id,
+    stage: 'placed', status: 0, stageTick: S.simTick, history: [{ stage: 'placed', tick: S.simTick, minute: S.match.minute, by: 'fan' }],
+    created: Date.now(), minute: S.match.minute, phase: S.match.phase,
+    total: pb.total, discount, fee: pb.fee, service: pb.service, vat: pb.vat, subtotal: pb.subtotal, payment: { simulated: true },
+    runner: type === 'delivery' ? RUNNERS[S.orders.length % RUNNERS.length] : null,
+    code: String(100 + Math.floor(srand() * 900)),
+    eventId: currentEvent().id,
   };
   order.eta0 = estimate(order);
+  order.lastEta = order.eta0;
   order.promised = Math.ceil(order.eta0) + 2;
   S.orders.unshift(order);
   countPlaced();
+  logActivity('fan', `${id} ${T('placed', 'جديد')} · ${order.tasks.map((x) => L(vendor(x.vid).name)).join(' + ')}`);
   items.forEach((i) => consumeStock(i.id, i.qty));
   items.filter((i) => item(i.id).cat === 'merch').forEach((i) => {
-    if (!S.trophies.some((t) => t.id === i.id)) S.trophies.push({ id: i.id, at: Date.now() });
+    if (!S.trophies.some((x) => x.id === i.id)) S.trophies.push({ id: i.id, at: Date.now() });
     S.purchases.push({ id: i.id, at: Date.now(), order: id });
     S.season.history.unshift({ kind: 'merch', id: i.id, md: S.season.matchday, at: Date.now() });
     if (['m3', 'x77', 'xstad'].includes(i.id)) S.quests.scarf = 1;
   });
   S.stadiumUnlock = clamp(S.stadiumUnlock + 3, 0, 100);
-  order.tasks.forEach((t) => { S.vendorLoad[t.vid] = clamp(S.vendorLoad[t.vid] + 6, 0, 100); if (!S.season.vendorsTried.includes(t.vid)) S.season.vendorsTried.push(t.vid); });
+  order.tasks.forEach((x) => { if (!S.season.vendorsTried.includes(x.vid)) S.season.vendorsTried.push(x.vid); });
   addAlert('order', { en: `New order ${id} split across ${order.tasks.length} vendor(s)`, ar: `طلب جديد ${id} موزّع على ${order.tasks.length} بائع` });
-  // rewards
-  const pts = Math.round(order.total) + 20;
-  addPoints(pts, T('Order placed', 'تم الطلب'));
+  // rewards (demo points)
+  addPoints(Math.round(order.total) + 20, T('Order placed', 'تم الطلب'));
   if (items.some((i) => ['snacks', 'fries'].includes(item(i.id).cat))) S.quests.snack = 1;
   awardBadge('first');
   if (S.orders.length >= 3) awardBadge('foodie');
@@ -213,22 +346,28 @@ function addAlert(kind, text) {
   S.alerts = S.alerts.slice(0, 25);
 }
 
-/* ---------- synthetic orders for the operator board ---------- */
+/* ---------- synthetic orders for the operator board (deterministic) ---------- */
 const FAKE_NAMES = ['Noura', 'Faisal', 'Huda', 'Omar', 'Sara', 'Khalid', 'Reem', 'Majed', 'Lama', 'Turki', 'Ruba', 'Ziad'];
+let opsSeq = 0;
 function makeOpsOrder() {
-  const n = 1 + Math.floor(Math.random() * 3);
+  opsSeq++;
+  const n = 1 + Math.floor(srand() * 3);
   const items = [];
   for (let i = 0; i < n; i++) {
-    const pool = Math.random() < 0.12 ? MERCH_ITEMS.filter((x) => !x.special) : MENU;
-    const m = pick(pool.filter((x) => !S.soldOut.includes(x.id)));
+    const pool = srand() < 0.12 ? MERCH_ITEMS.filter((x) => !x.special) : MENU;
+    const m = pick(pool.filter((x) => itemAvailable(x.id)));
+    if (!m) continue;
     const ex = items.find((x) => x.id === m.id);
     ex ? ex.qty++ : items.push({ id: m.id, qty: 1, by: 'x' });
   }
-  const type = Math.random() < 0.35 ? 'delivery' : 'pickup';
-  const dest = type === 'delivery' ? pick(['A', 'B', 'C']) : pick(PICKUPS).id;
-  const o = { id: 'GB-' + Math.floor(2000 + Math.random() * 7000), items, type, dest, fan: pick(FAKE_NAMES), status: 0, synthetic: true, handoff: 0,
-    runner: type === 'delivery' ? pick(RUNNERS) : null, bornTick: S.simTick,
-    note: Math.random() < 0.25 ? pick([{ en: 'No ice please', ar: 'بدون ثلج لو سمحت' }, { en: 'Allergic to sesame', ar: 'عندي حساسية من السمسم' }, { en: 'Wheelchair seat, aisle side', ar: 'مقعد كرسي متحرك، جهة الممر' }]) : '' };
+  if (!items.length) items.push({ id: 'd1', qty: 1, by: 'x' });
+  const zones = S.venueCfg.deliverySections.filter(deliveryAllowed);
+  const type = zones.length && srand() < 0.35 ? 'delivery' : 'pickup';
+  const pids = PICKUPS.filter((p) => pickupAllowed(p.id));
+  const dest = type === 'delivery' ? pick(zones) : (pick(pids) || PICKUPS[0]).id;
+  const o = { id: 'GB-' + (2000 + ((S.simTick * 37 + opsSeq * 101) % 7000)), items, type, dest, fan: pick(FAKE_NAMES), synthetic: true,
+    stage: 'placed', status: 0, stageTick: S.simTick, history: [], runner: type === 'delivery' ? pick(RUNNERS) : null, bornTick: S.simTick, code: String(100 + Math.floor(srand() * 900)),
+    note: srand() < 0.25 ? pick([{ en: 'No ice please', ar: 'بدون ثلج لو سمحت' }, { en: 'Allergic to sesame', ar: 'عندي حساسية من السمسم' }, { en: 'Wheelchair seat, aisle side', ar: 'مقعد كرسي متحرك، جهة الممر' }]) : '' };
   o.tasks = routeItems(items, destAngle(o));
   o.total = orderTotal(items);
   o.promised = Math.ceil(estimate(o)) + 2;
@@ -237,57 +376,66 @@ function makeOpsOrder() {
 }
 function seedOps() {
   if (S.opsOrders.length) return;
-  for (let i = 0; i < 9; i++) {
+  const stages = ['placed', 'accepted', 'preparing', 'ready', 'preparing', 'placed', 'ready', 'collected', 'preparing'];
+  stages.forEach((target, i) => {
     const o = makeOpsOrder();
-    const st = i % 4;
-    o.tasks.forEach((t) => { t.st = st === 3 ? 3 : Math.min(st, 2); t.t = st * 4; });
-    o.status = st;
-    // back-date so the board opens with realistic elapsed times (one is running late)
-    o.bornTick = S.simTick - (st * 6 + 2 + (i === 5 ? 30 : 0));
-    if (st === 3) { o.doneTick = S.simTick; o.completedAt = Date.now(); S.opsStats.completed++; }
+    o.bornTick = S.simTick - (i * 3 + 2 + (i === 4 ? 30 : 0));   // one order is deliberately running late
+    const f = flowOf(o);
+    const goal = f.includes(target) ? target : f[f.length - 1];
+    while (o.stage !== goal && nextStage(o)) setStage(o, nextStage(o), 'sim');
     S.opsOrders.push(o);
-  }
+  });
 }
 
-/* ---------- order lifecycle ---------- */
+/* Simulated kitchen/runner progress. Labelled as simulation everywhere it appears; never skips a state. */
 function stepOrder(o) {
-  if (o.status >= 3) return;
+  if (isFinal(o) || o.issue) return;
   if (o.schedule === 'halftime' && !['halftime', 'second', 'final'].includes(S.match.phase) && !(S.match.phase === 'kickoff' && S.match.minute >= 38)) return;
-  o.tasks.forEach((t) => {
-    if (t.st >= 2 || t.hold) return;
-    t.t++;
-    if (t.st === 0 && t.t >= 3) t.st = 1;
-    else if (t.st === 1 && t.t >= 3 + t.need) t.st = 2;
-  });
-  const minSt = Math.min(...o.tasks.map((t) => t.st));
-  const anyPrep = o.tasks.some((t) => t.st >= 1);
-  const prev = o.status;
-  if (o.status < 2) o.status = minSt >= 2 ? 2 : anyPrep ? 1 : 0;
-  if (o.status === 2) {
-    o.handoff = (o.handoff || 0) + 1;
-    const limit = o.type === 'delivery' ? 10 : 16;
-    if (o.handoff >= limit) completeOrder(o);
+  const since = S.simTick - (o.stageTick ?? o.bornTick);
+  const live = o.tasks.filter((x) => !x.rejected);
+  if (live.some((x) => vendorPaused(x.vid) && x.st < 2)) { o.hold = 'vendor_paused'; return; }
+  o.hold = null;
+  switch (o.stage) {
+    case 'placed': if (since >= 2) setStage(o, 'accepted', 'sim'); break;
+    case 'accepted': if (since >= 1) setStage(o, 'preparing', 'sim'); break;
+    case 'preparing':
+      live.forEach((x) => { if (x.st === 1) { x.prog = (x.prog || 0) + 1; if (x.prog >= x.need + (o.delay || 0)) x.st = 2; } });
+      if (live.every((x) => x.st >= 2)) setStage(o, 'ready', 'sim');
+      break;
+    case 'ready':
+      if (o.type === 'delivery') { if (since >= 2 && o.runner) setStage(o, 'dispatched', 'sim'); }
+      else if (o.synthetic && since >= 10) setStage(o, 'collected', 'sim');
+      else if (!o.synthetic && since >= 40 && !o.uncollectedNotice) { o.uncollectedNotice = true; toast(T(`Reminder: ${o.id} is waiting at ${L(pickup(o.dest).name)}.`, `تذكير: ${o.id} بانتظارك في ${L(pickup(o.dest).name)}.`), 'warn', 5000); }
+      break;
+    case 'dispatched': if (since >= 8) setStage(o, 'delivered', 'sim'); break;
   }
-  if (!o.synthetic && prev !== o.status) onOrderStatus(o);
-}
-function completeOrder(o) {
-  o.status = 3;
-  o.tasks.forEach((t) => (t.st = 3));
-  o.completedAt = Date.now();
-  o.doneTick = S.simTick;
-  S.opsStats.completed++;
-  o.tasks.forEach((t) => (S.vendorLoad[t.vid] = clamp(S.vendorLoad[t.vid] - 5, 5, 100)));
-  if (!o.synthetic) onOrderStatus(o);
 }
 function onOrderStatus(o) {
-  const msgs = [
-    null,
-    T(`Order ${o.id} is being prepared`, `طلبك ${o.id} قيد التحضير`),
-    o.type === 'delivery' ? T(`${o.runner} is on the way to your seat`, `${o.runner} في الطريق إلى مقعدك`) : T(`Order ${o.id} is ready at ${L(pickup(o.dest).name)}`, `طلبك ${o.id} جاهز في ${L(pickup(o.dest).name)}`),
-    T(`Order ${o.id} completed. Enjoy!`, `اكتمل طلبك ${o.id}. بالعافية!`),
-  ];
-  if (msgs[o.status]) toast(msgs[o.status], o.status === 3 ? 'success' : 'info');
+  const where = o.type === 'delivery' ? T('to your seat', 'إلى مقعدك') : L(pickup(o.dest).name);
+  const msgs = {
+    accepted: T(`${o.id} accepted by the kitchen`, `تم قبول ${o.id} من المطبخ`),
+    preparing: T(`${o.id} is being prepared`, `${o.id} قيد التحضير`),
+    ready: o.type === 'delivery' ? T(`${o.id} is ready — waiting for the runner`, `${o.id} جاهز — بانتظار المندوب`) : T(`${o.id} is ready at ${where}`, `${o.id} جاهز في ${where}`),
+    dispatched: T(`${o.runner} is on the way ${where}`, `${o.runner} في الطريق ${where}`),
+    delivered: T(`${o.id} delivered. Enjoy!`, `تم توصيل ${o.id}. بالعافية!`),
+    collected: T(`${o.id} collected. Enjoy!`, `تم استلام ${o.id}. بالعافية!`),
+    cancelled: T(`${o.id} was cancelled`, `تم إلغاء ${o.id}`),
+  };
+  if (msgs[o.stage]) toast(msgs[o.stage], isFinal(o) && o.stage !== 'cancelled' ? 'success' : o.stage === 'cancelled' ? 'warn' : 'info');
   nativeOrderStatus(o);
+}
+/* Tell the fan when an estimate moves by 3+ minutes, and why. */
+function checkEtaChange(o) {
+  if (isFinal(o) || o.synthetic) return;
+  const e = Math.round(estimate(o));
+  const prev = Math.round(o.lastEta ?? e);
+  if (S.simTick - (o.bornTick ?? 0) < 6) { o.lastEta = e; return; }   // settle the first estimate silently
+  if (e - prev >= 3 || prev - e >= 5) {
+    const why = o.hold === 'vendor_paused' ? T('a vendor paused orders', 'أوقف أحد البائعين الطلبات مؤقتاً') : o.delay ? T('the kitchen reported a delay', 'أبلغ المطبخ عن تأخير') : e > prev ? T('the queue got longer', 'زاد الطابور') : T('the queue moved faster', 'تحرك الطابور أسرع');
+    o.etaNote = { from: prev, to: e, why, tick: S.simTick };
+    toast(T(`${o.id}: new estimate ~${e} min (was ${prev}) — ${why}.`, `${o.id}: الوقت المتوقع الجديد ~${e} د (كان ${prev}) — ${why}.`), 'warn', 4500);
+    o.lastEta = e;
+  }
 }
 
 /* ---------- match & crowd simulation ---------- */
@@ -302,7 +450,7 @@ function tick() {
   S.simTick++;
   const m = S.match;
   // match clock
-  if (m.clock && S.user && S.setup && tickCount % 2 === 0) {
+  if (m.clock && S.user && S.setup && !S.ops.cancelled && S.simTick % 2 === 0) {
     if (m.phase === 'arrival' || m.phase === 'prematch') {
       m.minute++;
       if (m.minute >= -30 && m.phase === 'arrival') m.phase = 'prematch';
@@ -316,41 +464,44 @@ function tick() {
       if (m.minute >= 90) trigger('final');
     }
   }
-  // crowd drift
+  // crowd: deterministic drift toward a phase target (no random noise)
   const halftime = m.phase === 'halftime';
-  Object.keys(S.crowd).forEach((k) => {
+  Object.keys(S.crowd).forEach((k, i) => {
     const isPickup = k.startsWith('P');
     let target = isPickup ? (halftime ? 78 : m.phase === 'prematch' ? 45 : 28) : halftime ? 70 : m.phase === 'arrival' ? 55 : 42;
     if (S.crowdBoost) target += S.crowdBoost;
+    if (isPickup) target += S.orders.concat(S.opsOrders).filter((o) => o.type === 'pickup' && o.dest === k && o.stage === 'ready').length * 4;
     if (isPickup && S.overloaded.includes(k)) target = 96;
-    S.crowd[k] = clamp(S.crowd[k] + (target - S.crowd[k]) * 0.08 + rand(-2.5, 2.5), 5, 99);
+    S.crowd[k] = clamp(S.crowd[k] + (target - S.crowd[k]) * 0.08 + Math.sin((S.simTick + i * 5) / 6) * 0.8, 5, 99);
   });
-  m.intensity = clamp(m.intensity + rand(-2, 2) + (m.phase === 'second' && m.minute > 75 ? 0.6 : 0) - (m.intensity > 60 ? 0.6 : 0), 10, 100);
-  Object.keys(S.vendorLoad).forEach((k) => (S.vendorLoad[k] = clamp(S.vendorLoad[k] + rand(-1.5, 1.6) + (halftime ? 0.8 : 0), 5, 98)));
-  // rivalry counters
-  S.rivalry.A += Math.round(rand(0, 4)); S.rivalry.B += Math.round(rand(0, 4)); S.rivalry.C += Math.round(rand(0, 3));
-  if (tickCount % 6 === 0) S.stadiumUnlock = clamp(S.stadiumUnlock + 0.5, 0, 100);
+  m.intensity = clamp(m.intensity + Math.sin(S.simTick / 5) * 1.5 + (m.phase === 'second' && m.minute > 75 ? 0.6 : 0) - (m.intensity > 60 ? 0.6 : 0), 10, 100);
+  // vendor workload = active tasks vs configured capacity
+  VENDORS.forEach((v) => (S.vendorLoad[v.id] = clamp(Math.round(10 + (activeTasks(v.id) / vendorCap(v.id)) * 90), 5, 99)));
+  S.rivalry.A += S.simTick % 3; S.rivalry.B += (S.simTick + 1) % 3; S.rivalry.C += S.simTick % 2;
+  if (S.simTick % 6 === 0) S.stadiumUnlock = clamp(S.stadiumUnlock + 0.5, 0, 100);
   if (S.stadiumUnlock >= 100 && !S.unlocked.includes('xstad')) {
     S.unlocked.push('xstad');
-    toast(T('✨ Stadium-wide unlock reached! Golden Scarf now in Club Shop.', '✨ اكتمل الهدف الجماعي! الوشاح الذهبي متاح الآن في المتجر.'), 'success', 5000);
+    toast(T('✨ Stadium-wide goal reached (demo)! Golden Scarf is now in the Club Shop.', '✨ اكتمل الهدف الجماعي (تجريبي)! الوشاح الذهبي متاح الآن في المتجر.'), 'success', 5000);
   }
   // orders
-  S.orders.forEach(stepOrder);
-  if (S.group?.sim && tickCount % 7 === 0) groupBotAdd();
+  if (S.demo.autopilot) { S.orders.forEach(stepOrder); }
+  S.orders.forEach(checkEtaChange);
+  if (S.group?.sim && S.simTick % 7 === 0) groupBotAdd();
   seedOps();
-  S.opsOrders.forEach(stepOrder);
-  S.opsOrders = S.opsOrders.filter((o) => !(o.status >= 3 && Date.now() - (o.completedAt || 0) > 20000)).slice(0, 18);
-  if (Math.random() < (halftime ? 0.35 : 0.15) && S.opsOrders.filter((o) => o.status < 3).length < 12) S.opsOrders.push(makeOpsOrder());
-  // offers engagement
+  if (S.demo.autopilot) S.opsOrders.forEach(stepOrder);
+  S.opsOrders = S.opsOrders.filter((o) => !(isFinal(o) && S.simTick - (o.doneTick || 0) > 20)).slice(0, 20);
+  const every = halftime ? 3 : 6;
+  if (S.demo.autopilot && orderingStatus().open && S.simTick % every === 0 && S.opsOrders.filter((o) => !isFinal(o)).length < 12) S.opsOrders.push(makeOpsOrder());
+  // campaign engagement (simulated, deterministic)
   S.offers.forEach((of) => {
-    if (!of.active || !offerLive(of)) return;
-    const bucket = of.m[m.phase];
-    bucket.v += Math.round(rand(4, 14));
-    if (Math.random() < 0.5) { bucket.r++; const k = pick(of.sections); of.s[k] = (of.s[k] || 0) + 1; }
-    if (Math.random() < 0.35 && bucket.o < bucket.r) bucket.o++;
+    if (!offerLive(of)) return;
+    const b = of.m[m.phase];
+    b.v += 6 + (S.simTick % 5);
+    if (S.simTick % 2 === 0) { b.r++; const k = of.sections[S.simTick % of.sections.length]; of.s[k] = (of.s[k] || 0) + 1; }
+    if (S.simTick % 3 === 0 && b.o < b.r) b.o++;
+    if (of.limit && offerTotals(of).r >= of.limit) { of.status = 'ended'; logActivity('sim', `${L(of.title)}: ${T('redemption limit reached', 'وصل حد الاستخدام')}`); }
   });
   if (S.flash && S.flash.until <= Date.now()) S.flash = null;
-  if (!S.flash && Math.random() < 0.01 && m.phase !== 'final') startFlash();
   save();
   refreshLive();
   if (SHEET && SHEET.live) renderSheet();
@@ -358,7 +509,7 @@ function tick() {
 
 function offerLive(of) {
   const m = S.match;
-  if (!of.active) return false;
+  if (!of.active || ['paused', 'ended', 'draft'].includes(of.status)) return false;
   switch (of.moment) {
     case 'now': return true;
     case 'arrival': return m.phase === 'arrival' || (m.phase === 'prematch' && m.minute < -20);
@@ -371,8 +522,8 @@ function offerLive(of) {
 }
 
 function startFlash() {
-  const it = pick(MENU.filter((x) => !S.soldOut.includes(x.id)));
-  S.flash = { item: it.id, pct: pick([15, 20, 25, 30]), until: Date.now() + 120000, zone: bestPickup().id };
+  const it = MENU.find((x) => x.id === 's2' && itemAvailable(x.id)) || MENU.find((x) => itemAvailable(x.id));
+  S.flash = { item: it.id, pct: 20, until: Date.now() + 120000, zone: bestPickup().id };
 }
 
 function setPhase(p) {
@@ -515,7 +666,10 @@ function trigger(kind, arg) {
       S.stock[target] = 0;
       addAlert('stock', { en: `${item(target).name.en} sold out — suggesting ${item(ALTERNATIVES[target]).name.en}`, ar: `نفد ${item(target).name.ar} — اقتراح ${item(ALTERNATIVES[target]).name.ar}` });
       toast(T(`${item(target).emoji} ${L(item(target).name)} just sold out. Try ${L(item(ALTERNATIVES[target]).name)}.`, `${item(target).emoji} نفد ${L(item(target).name)}. جرّب ${L(item(ALTERNATIVES[target]).name)}.`), 'warn', 5000);
-      S.orders.filter((o) => o.status < 2 && o.items.some((i) => i.id === target)).forEach((o) => (o.issue = { kind: 'soldout', item: target }));
+      S.orders.filter((o) => ['placed', 'accepted', 'preparing'].includes(o.stage) && o.items.some((i) => i.id === target)).forEach((o) => {
+        o.issue = { kind: 'soldout', item: target };
+        logActivity('sim', `${o.id}: ${L(item(target).name)} ${T('unavailable after order', 'غير متاح بعد الطلب')}`);
+      });
       break;
     }
     case 'reset':
@@ -526,8 +680,9 @@ function trigger(kind, arg) {
       S.prediction = null; S.quiz = { done: false, score: 0 };
       S.season.matchday++;
       S.stock = defaultStock();
-      S.opsOrders = []; S.opsStats = { completed: 214, byPhase: { arrival: 58, prematch: 156 } };
-      S.alerts = [];
+      S.opsOrders = []; S.opsStats = { completed: 214, cancelled: 0, byPhase: { arrival: 58, prematch: 156 } };
+      S.alerts = []; S.ledger = []; S.tasks = []; S.ops = defaultOpsState(); S.svcStatus = {}; S.activity = []; S.rng = 20261024; S.flash = null;
+      logActivity('admin', T('Event reset to the sample state', 'تمت إعادة الفعالية للحالة النموذجية'));
       toast(T(`Event reset — Matchday ${S.season.matchday} ready.`, `تمت إعادة الحدث — الجولة ${S.season.matchday} جاهزة.`), 'success');
       break;
   }
@@ -556,9 +711,9 @@ function groupBotAdd() {
   if (!g || g.confirmed) return;
   const names = g.members.filter((x) => x !== g.me);
   if (!names.length) return;
-  const who = pick(names);
+  const who = names[g.items.length % names.length];
   if (g.items.filter((i) => i.by === who).length >= 2) { g.sim = g.items.filter((i) => i.by !== g.me).length < names.length * 2; return; }
-  const m = pick(MENU.filter((x) => !S.soldOut.includes(x.id)));
+  const m = MENU.filter((x) => itemAvailable(x.id))[(g.items.length * 5) % MENU.length] || MENU[0];
   g.items.push({ id: m.id, qty: 1, by: who });
-  toast(T(`${who} added ${m.emoji} ${L(m.name)}`, `${who} أضاف ${m.emoji} ${L(m.name)}`), 'info', 1800);
+  toast(T(`Simulated participant ${who} added ${L(m.name)}`, `المشارك الافتراضي ${who} أضاف ${L(m.name)}`), 'info', 1800);
 }

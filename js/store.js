@@ -69,7 +69,7 @@ function defaultState() {
     cart: { type: 'pickup', items: {}, dest: null, schedule: 'now', combo: 0, note: '' },
     orders: [],
     opsOrders: [],                // synthetic orders from other fans
-    opsStats: { completed: 214, byPhase: { arrival: 58, prematch: 156 } },
+    opsStats: { completed: 214, cancelled: 0, byPhase: { arrival: 58, prematch: 156 } },
     favorites: [],
     vouchers: [],                 // { id, item, pct, label, offer }
     group: null,
@@ -96,6 +96,21 @@ function defaultState() {
     shopCat: 'all',
     dismissed: [],                // dismissed companion cards this match
     tour: null,
+    // platform state (all demo / local to this browser)
+    rng: 20261024,                // seed for the deterministic demo generator
+    venueCfg: defaultVenueConfig(),
+    ops: defaultOpsState(),
+    svcStatus: {},                // directory overrides: { id: 'unavailable' }
+    activity: [],                 // event-day activity log
+    tasks: [],                    // facility issues / frontline tasks
+    support: [],                  // fan support requests
+    feedback: null,
+    savedCar: null,               // only when the fan chooses to save it
+    prefs: { saveSeat: true },
+    menuAvoid: [],
+    ledger: [],
+    vendorId: 'v1',               // vendor console scope (demo)
+    demo: { autopilot: true, scenario: null },
   };
 }
 
@@ -115,6 +130,11 @@ function loadState() {
     if (saved.bag) { Object.entries(saved.bag).forEach(([id, q]) => { if (CATALOG.some((m) => m.id === id)) st.cart.items[id] = (st.cart.items[id] || 0) + q; }); delete st.bag; }
     st.stock = Object.assign(defaultStock(), saved.stock || {});
     st.vendorLoad = Object.assign({ v5: 20 }, st.vendorLoad);
+    st.venueCfg = Object.assign(defaultVenueConfig(), saved.venueCfg || {});
+    st.ops = Object.assign(defaultOpsState(), saved.ops || {});
+    st.demo = Object.assign({ autopilot: true, scenario: null }, saved.demo || {});
+    // orders from older versions get a lifecycle stage
+    [...st.orders, ...st.opsOrders].forEach((o) => { if (!o.stage) { o.stage = ['placed', 'preparing', 'ready', o.type === 'delivery' ? 'delivered' : 'collected'][o.status] || 'placed'; o.history = o.history || []; o.tasks.forEach((tk) => { tk.acc = true; }); } });
     return st;
   } catch (e) {
     return base;
@@ -125,7 +145,9 @@ let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* storage unavailable: demo still works in memory */ }
+    // the seat is only remembered on this device when the fan chose to keep it
+    const out = S.prefs && !S.prefs.saveSeat && S.setup ? Object.assign({}, S, { setup: null }) : S;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(out)); } catch (e) { /* storage unavailable: demo still works in memory */ }
   }, 120);
 }
 
@@ -142,9 +164,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const sar = (n) => (S.lang === 'ar' ? `${fmtNum(n)} ر.س` : `SAR ${fmtNum(n)}`);
 const fmtNum = (n) => (Math.round(n * 100) / 100).toLocaleString('en-US');
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const rand = (a, b) => a + Math.random() * (b - a);
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const uid = (p = '') => p + Math.random().toString(36).slice(2, 7).toUpperCase();
+/* Deterministic demo randomness: the same scenario from a reset produces the same results. */
+function srand() { S.rng = (S.rng * 1103515245 + 12345) % 2147483648; return S.rng / 2147483648; }
+const rand = (a, b) => a + srand() * (b - a);
+const pick = (arr) => arr[Math.floor(srand() * arr.length)];
+const uid = (p = '') => p + Math.floor(srand() * 60466176).toString(36).toUpperCase().padStart(5, '0');
 
 const item = (id) => CATALOG.find((m) => m.id === id);
 const merch = (id) => MERCH_ITEMS.find((m) => m.id === id);

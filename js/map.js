@@ -21,11 +21,12 @@ const jit = (id, k) => ((id.charCodeAt(3 + k) * 7 + id.charCodeAt(5) * 3) % 11) 
 function orderMarkerPos(o) {
   const v = vendor(o.tasks[0].vid);
   const dA = destAngle(o);
-  if (o.status < 2) return { p: ptAt(v.angle), label: T('Preparing', 'قيد التحضير') };
-  if (o.status >= 3) return null;
-  if (o.type === 'pickup') return { p: ptAt(dA), label: T('Ready', 'جاهز') };
+  if (isFinal(o)) return null;
+  if (['placed', 'accepted', 'preparing'].includes(o.stage)) return { p: ptAt(v.angle), label: stageLabel(o.stage) };
+  if (o.type === 'pickup') return { p: ptAt(dA), label: stageLabel('ready') };
+  if (o.stage === 'ready') return { p: ptAt(v.angle), label: stageLabel('ready') };
   const r = planRoute(v.angle, dA);
-  const f = clamp((o.handoff || 0) / 10, 0, 1);
+  const f = clamp((S.simTick - (o.stageTick || 0)) / 8, 0, 1);
   const idx = Math.min(r.pts.length - 1, Math.floor(f * (r.pts.length - 1)));
   return { p: r.pts[idx], label: T('On the way', 'في الطريق'), route: r };
 }
@@ -83,11 +84,24 @@ function stadiumMap(opts = {}) {
   }).join('');
 
   // facilities
-  const facilities = (detailed || opts.facilities) ? FACILITIES.map((f) => {
-    const p = ptAt(f.angle, 188, 137);
-    return `<g class="map-hit" data-act="mapInfo" data-arg="fac:${f.kind}" tabindex="0" role="button" aria-label="${esc(L(FACILITY_LABELS[f.kind]))}">
-      <circle cx="${p.x}" cy="${p.y}" r="6.5" fill="var(--map-card)" stroke="var(--map-line)"/><text x="${p.x}" y="${p.y + 3}" class="map-emoji sm">${FACILITY_LABELS[f.kind].icon}</text></g>`;
+  const FAC_CATS = ['restroom', 'prayer', 'firstaid', 'access', 'water', 'guest', 'family'];
+  const facilities = (detailed || opts.facilities) ? DIRECTORY.filter((e) => FAC_CATS.includes(e.cat) && (!opts.cat || opts.cat === 'all' || opts.cat === e.cat)).map((e) => {
+    const p = ptAt(e.angle, 188, 137);
+    const off = dirStatus(e) !== 'open';
+    return `<g class="map-hit ${off ? 'map-off' : ''}" data-act="dirInfo" data-arg="${e.id}" tabindex="0" role="button" aria-label="${esc(dirName(e))} · ${esc(t('svc.' + dirStatus(e)))}">
+      <circle cx="${p.x}" cy="${p.y}" r="6.5" fill="var(--map-card)" stroke="${off ? 'var(--busy)' : 'var(--map-line)'}"/><text x="${p.x}" y="${p.y + 3}" class="map-emoji sm">${SERVICE_CATS.find((c) => c.id === e.cat).icon}</text></g>`;
   }).join('') : '';
+  // highlighted directory entry (from Explore)
+  const hl = opts.highlight ? DIRECTORY.find((e) => e.id === opts.highlight) : null;
+  const hlSvg = hl ? (() => { const p = ptAt(hl.angle, ['restroom', 'prayer', 'firstaid', 'access', 'water', 'guest', 'family'].includes(hl.cat) ? 188 : GEO.rx, ['restroom', 'prayer', 'firstaid', 'access', 'water', 'guest', 'family'].includes(hl.cat) ? 137 : GEO.ry); return `<g transform="translate(${p.x} ${p.y})"><circle r="15" class="pulse-ring"/><circle r="11" fill="none" stroke="var(--orange)" stroke-width="2.5"/></g>`; })() : '';
+  // route to a directory entry
+  let toSvg = '';
+  if (opts.routeTo && S.setup) {
+    const r = planRoute(SECTIONS[S.setup.section].angle, opts.routeTo);
+    r.pts.unshift(ptAt(SECTIONS[S.setup.section].angle, 128, 90));
+    const d = polyPath(r.pts);
+    toSvg = `<path d="${d}" class="route-line ${r.detour ? 'detour' : ''}" fill="none"/><path d="${d}" class="route-dash" fill="none"/>`;
+  }
 
   // accessible route (detailed): step-free ring on the inner concourse
   const access = detailed ? `<ellipse cx="${GEO.cx}" cy="${GEO.cy}" rx="166" ry="119" fill="none" stroke="#3B82F6" stroke-width="1.4" stroke-dasharray="1 4" stroke-linecap="round" opacity=".9"/>` : '';
@@ -162,9 +176,10 @@ function stadiumMap(opts = {}) {
       ${stands}${westStand}${seats}${field}
       ${live(id + '-dyn', dyn, 'g')}
       ${routeSvg}
-      ${gates}${vendors}${facilities}${you}
+      ${toSvg}${gates}${vendors}${facilities}${hlSvg}${you}
       ${live(id + '-ord', ord, 'g')}
     </svg>
+    <p class="map-caption">${dataBadge('demo')} ${T('Illustrative diagram — not to scale, not for exact navigation. Waits and crowd levels are simulated.', 'رسم توضيحي — ليس بمقياس دقيق ولا يصلح للملاحة الدقيقة. أوقات الانتظار والكثافة محاكاة.')}</p>
   </div>`;
 }
 
@@ -190,6 +205,7 @@ function mapInfoSheet(arg) {
   const [kind, id] = arg.split(':');
   const sec = S.setup ? SECTIONS[S.setup.section] : SECTIONS.A;
   let title = '', body = '', actions = '';
+  if (kind === 'dir') return dirSheet(id);
   if (kind === 'pick') {
     const p = pickup(id);
     const r = planRoute(sec.angle, p.angle);
@@ -205,7 +221,7 @@ function mapInfoSheet(arg) {
   } else if (kind === 'sec') {
     const s = SECTIONS[id];
     title = L(s.name);
-    body = `<div class="stat-grid">${statCard(T('Crowd', 'الكثافة'), levelWord(S.crowd[id]), levelKind(S.crowd[id]))}${statCard(T('Delivery', 'التوصيل'), T('Available', 'متاح'))}${statCard(T('Nearest pickup', 'أقرب استلام'), L(PICKUPS.slice().sort((a, b) => angDist(a.angle, s.angle) - angDist(b.angle, s.angle))[0].name))}</div>`;
+    body = `<div class="stat-grid">${statCard(T('Crowd', 'الكثافة'), levelWord(S.crowd[id]), levelKind(S.crowd[id]))}${statCard(T('Seat delivery', 'التوصيل'), deliveryAllowed(id) ? T('Available', 'متاح') : t('svc.unavailable'))}${statCard(T('Nearest pickup', 'أقرب استلام'), L(PICKUPS.slice().sort((a, b) => angDist(a.angle, s.angle) - angDist(b.angle, s.angle))[0].name))}</div>`;
     actions = `<button class="btn btn-primary grow" data-act="findSeat" data-arg="${id}">${icon('route')} ${T('Route here', 'المسار إلى هنا')}</button>`;
   } else if (kind === 'ven') {
     const v = vendor(id);
@@ -218,11 +234,6 @@ function mapInfoSheet(arg) {
     title = L(g.name);
     body = `<p class="muted">${T('Entrance and exit. Step-free access and bag check.', 'مدخل ومخرج. وصول بدون درج وتفتيش الحقائب.')}</p>`;
     actions = `<button class="btn btn-primary grow" data-act="setGate" data-arg="${id}">${T('I am entering here', 'سأدخل من هنا')}</button>`;
-  } else if (kind === 'fac') {
-    const f = FACILITY_LABELS[id];
-    const near = FACILITIES.filter((x) => x.kind === id).sort((a, b) => angDist(a.angle, sec.angle) - angDist(b.angle, sec.angle))[0];
-    title = `${f.icon} ${L(f)}`;
-    body = `<p class="muted">${T('Nearest to your section', 'الأقرب لقسمك')}: ${mins(walkMins(planRoute(sec.angle, near.angle).len))} ${T('walk', 'مشياً')}. ${T('Step-free access available.', 'وصول بدون درج متاح.')}</p>`;
   }
   return `<h2 class="sheet-title">${title}</h2>${body}<div class="row gap mt">${actions}<button class="btn btn-ghost grow" data-act="closeSheet">${T('Close', 'إغلاق')}</button></div>`;
 }

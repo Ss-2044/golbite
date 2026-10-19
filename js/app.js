@@ -13,24 +13,26 @@ function go(path) {
 
 const FAN_NAV = [
   ['home', 'home', { en: 'Home', ar: 'الرئيسية' }],
-  ['orders', 'receipt', { en: 'Orders', ar: 'الطلبات' }],
-  ['play', 'play', { en: 'Play', ar: 'العب' }],
-  ['shop', 'shirt', { en: 'Club Shop', ar: 'المتجر' }],
+  ['explore', 'map', { en: 'Explore', ar: 'استكشف' }],
+  ['menu', 'bag', { en: 'Order', ar: 'اطلب' }],
+  ['play', 'trophy', { en: 'Matchday', ar: 'يوم المباراة' }],
   ['profile', 'user', { en: 'Profile', ar: 'حسابي' }],
 ];
-const NAV_OWNER = { home: 'home', map: 'home', menu: 'orders', summary: 'orders', track: 'orders', orders: 'orders', group: 'orders', play: 'play', shop: 'shop', profile: 'profile', settings: 'profile' };
-const ROLE_HOME = { fan: 'home', operator: 'ops/overview', partner: 'partner/results' };
-const ROLES = () => [['fan', T('Fan', 'مشجع'), 'user'], ['operator', T('Venue', 'المشغّل'), 'store'], ['partner', T('Partner', 'الشريك'), 'megaphone']];
+const NAV_OWNER = { home: 'home', guide: 'home', explore: 'explore', map: 'explore', menu: 'menu', summary: 'menu', track: 'menu', orders: 'menu', group: 'menu', shop: 'menu', play: 'play', profile: 'profile', settings: 'profile', support: 'profile' };
+const ROLE_HOME = { fan: 'home', operator: 'ops/overview', vendor: 'vendor/queue', partner: 'partner/results', admin: 'admin/setup' };
+const ROLE_ICON = { fan: 'user', operator: 'store', vendor: 'bag', partner: 'megaphone', admin: 'settings' };
+const ROLES = () => ['fan', 'operator', 'vendor', 'partner', 'admin'].map((k) => [k, t('role.' + k), ROLE_ICON[k]]);
+const ROLE_NAV = () => ({ operator: ['ops', OPS_NAV, 'overview'], vendor: ['vendor', VENDOR_NAV, 'queue'], partner: ['partner', PARTNER_NAV, 'results'], admin: ['admin', ADMIN_NAV, 'setup'] });
 /* Navigation items per role: [route, icon, label, ownerKey] */
 function navItems() {
-  if (S.role === 'operator') return OPS_NAV.map(([k, ic, l]) => [`ops/${k}`, ic, l, k]);
-  if (S.role === 'partner') return PARTNER_NAV.map(([k, ic, l]) => [`partner/${k}`, ic, l, k]);
+  const rn = ROLE_NAV()[S.role];
+  if (rn) return rn[1].map(([k, ic, l]) => [`${rn[0]}/${k}`, ic, l, k]);
   return FAN_NAV.map(([k, ic, l]) => [k, ic, l, k]);
 }
 function navActive() {
   const r = route();
-  if (S.role === 'operator') return r.name === 'ops' && OPS_NAV.some(([k]) => k === r.arg) ? r.arg : 'overview';
-  if (S.role === 'partner') return r.name === 'partner' && PARTNER_NAV.some(([k]) => k === r.arg) ? r.arg : 'results';
+  const rn = ROLE_NAV()[S.role];
+  if (rn) return r.name === rn[0] && rn[1].some(([k]) => k === r.arg.split('/')[0]) ? r.arg.split('/')[0] : rn[2];
   return NAV_OWNER[r.name] || 'home';
 }
 
@@ -39,8 +41,10 @@ function currentView() {
   if (!S.user) return { key: 'signin', html: viewSignin };
   if (!S.setup || r.name === 'setup') return { key: 'setup', html: viewSetup };
   if (S.role === 'operator') return { key: 'ops', html: () => viewOps(r.name === 'ops' ? r.arg : 'overview') };
+  if (S.role === 'vendor') return { key: 'vendor', html: () => viewVendor(r.name === 'vendor' ? r.arg : 'queue') };
   if (S.role === 'partner') return { key: 'partner', html: () => viewPartner(r.name === 'partner' ? r.arg : 'results') };
-  const map = { home: viewHome, map: viewMap, menu: viewMenu, summary: viewSummary, track: () => viewTrack(r.arg), orders: viewOrders, group: viewGroup, play: viewPlay, shop: viewShop, profile: () => viewProfile(r.arg), settings: viewSettings };
+  if (S.role === 'admin') return { key: 'admin', html: () => viewAdmin(r.name === 'admin' ? r.arg : 'setup') };
+  const map = { home: viewHome, explore: viewExplore, guide: () => viewGuide(r.arg), map: viewMap, menu: viewMenu, summary: viewSummary, track: () => viewTrack(r.arg), orders: viewOrders, group: viewGroup, play: viewPlay, shop: viewShop, profile: () => viewProfile(r.arg), settings: viewSettings, support: viewSupport };
   return { key: r.name, html: map[r.name] || viewHome };
 }
 
@@ -67,14 +71,14 @@ function rerender() {
   const inApp = S.user && S.setup && v.key !== 'setup';
   const fan = S.role === 'fan';
   const active = navActive();
-  const navLink = ([path, ic, l, key]) => `<a href="#/${path}" class="${active === key ? 'on' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon(ic)}<span>${L(l)}</span>${fan && key === 'orders' && activeOrder() ? '<i class="dot"></i>' : ''}${S.role === 'operator' && key === 'orders' && allOpsOrders().some(needsAttention) ? '<i class="dot alert"></i>' : ''}</a>`;
+  const navLink = ([path, ic, l, key]) => `<a href="#/${path}" class="${active === key ? 'on' : ''}" ${active === key ? 'aria-current="page"' : ''}>${icon(ic)}<span>${L(l)}</span>${fan && key === 'menu' && activeOrder() ? `<i class="dot" aria-label="${T('Active order', 'طلب نشط')}"></i>` : ''}${S.role === 'operator' && key === 'orders' && allOpsOrders().some(needsAttention) ? '<i class="dot alert"></i>' : ''}</a>`;
   app.className = inApp ? `shell role-${S.role}` : 'shell bare';
   app.innerHTML = `
     ${inApp ? topbar() : `<div class="mini-top"><img src="assets/logo.png" alt="GolBite" class="logo-img"/>${langBtn()}</div>`}
     ${inApp ? `<nav class="sidenav" aria-label="${T('Main', 'الرئيسية')}">
       <div class="sidenav-role">${roleBadge()}</div>
       ${navItems().map(navLink).join('')}
-      <div class="sidenav-foot">${fan ? `<a href="#/settings">${icon('settings')}<span>${T('Settings', 'الإعدادات')}</span></a>` : `<button class="side-switch" data-act="setRole" data-arg="fan">${icon('user')}<span>${T('Back to fan view', 'العودة لواجهة المشجع')}</span></button>`}</div></nav>` : ''}
+      <div class="sidenav-foot">${fan ? `<a href="#/support">${icon('help')}<span>${T('Help', 'المساعدة')}</span></a><a href="#/settings">${icon('settings')}<span>${T('Settings', 'الإعدادات')}</span></a>` : `<button class="side-switch" data-act="setRole" data-arg="fan">${icon('user')}<span>${T('Back to fan view', 'العودة لواجهة المشجع')}</span></button>`}</div></nav>` : ''}
     <main id="main" tabindex="-1">${v.html()}</main>
     ${inApp ? `<nav class="bottomnav n${navItems().length}" aria-label="${T('Main', 'الرئيسية')}">${navItems().map(navLink).join('')}</nav>` : ''}
     ${inApp ? `<button class="demo-fab" data-act="openDemo" aria-label="${T('Demo controls', 'أدوات العرض')}" title="${T('Demo controls', 'أدوات العرض')}">${icon('flask')}</button>` : ''}
@@ -89,21 +93,31 @@ function rerender() {
 }
 
 function roleBadge() {
-  const r = ROLES().find(([k]) => k === S.role);
-  const sub = { fan: T('Matchday companion', 'رفيق المباراة'), operator: T('Venue Control Center', 'مركز التحكم بالملعب'), partner: T('Club & partner hub', 'مركز النادي والشركاء') }[S.role];
-  return `<span class="role-badge r-${S.role}">${icon(r[2])}<span><b>${r[1]}</b><small>${sub}</small></span></span>`;
+  const sub = { fan: T('Matchday companion', 'رفيق المباراة'), operator: T('Venue operations console', 'لوحة تشغيل الملعب'), vendor: T('Vendor console', 'لوحة البائع'), partner: T('Partner campaigns', 'حملات الشركاء'), admin: T('Venue administration', 'إدارة الملعب') }[S.role];
+  return `<span class="role-badge r-${S.role}">${icon(ROLE_ICON[S.role])}<span><b>${t('role.' + S.role)}</b><small>${sub}</small></span></span>`;
+}
+/* Active-order chip, visible on every fan screen. */
+function activeChip() {
+  const o = activeOrder();
+  if (!o || S.role !== 'fan') return '';
+  return `<a class="active-chip ${o.issue ? 'warn' : ''}" href="#/track/${o.id}" aria-label="${T('Active order', 'طلب نشط')} ${o.id}: ${stageLabel(o.stage)}">${icon(o.issue ? 'alert' : 'receipt')}<span><b>${stageLabel(o.stage)}</b><small>${o.id}${o.stage === 'ready' || o.stage === 'dispatched' ? '' : ' · ~' + mins(estimate(o))}</small></span></a>`;
 }
 function topbar() {
   const ev = currentEvent();
   return `<header class="topbar">
-    <a href="#/home" class="brand" aria-label="GolBite ${T('home', 'الرئيسية')}"><img src="assets/logo.png" alt="GolBite" class="logo-img"/></a>
-    <div class="top-event"><span class="team-dot" style="--tc:${myTeam().color}"></span><span class="ellipsis">${esc(L(ev.title))}</span>${live('top-clock', () => `<b>${S.match.phase === 'arrival' || S.match.phase === 'prematch' ? phaseLabel() : S.match.phase === 'halftime' || S.match.phase === 'final' ? phaseLabel() : S.match.minute + "'"}</b>`, 'span')}</div>
-    <div class="role-switch seg" role="group" aria-label="${T('Switch role', 'تبديل الدور')}">
-      ${ROLES().map(([k, l, ic]) => `<button class="${S.role === k ? 'on' : ''}" data-act="setRole" data-arg="${k}" aria-pressed="${S.role === k}">${icon(ic)}<span>${l}</span></button>`).join('')}
-    </div>
+    <a href="#/${ROLE_HOME[S.role]}" class="brand" aria-label="GolBite ${T('home', 'الرئيسية')}"><img src="assets/logo.png" alt="GolBite" class="logo-img"/></a>
+    <div class="top-event"><span class="team-dot" style="--tc:${myTeam().color}"></span><span class="ellipsis">${esc(L(ev.title))}</span>${live('top-clock', () => `<b>${S.ops.cancelled ? t('ev.cancelled') : S.match.phase === 'arrival' || S.match.phase === 'prematch' || S.match.phase === 'halftime' || S.match.phase === 'final' ? phaseLabel() : S.match.minute + "'"}</b>`, 'span')}</div>
+    ${live('active-chip', activeChip, 'span', 'active-chip-wrap')}
+    <button class="role-btn r-${S.role}" data-act="roleSheet" aria-haspopup="dialog" aria-label="${T('Demo role', 'الدور التجريبي')}: ${t('role.' + S.role)}">${icon(ROLE_ICON[S.role])}<span>${t('role.' + S.role)}</span><small>${T('Demo', 'تجريبي')}</small>${icon('down')}</button>
     ${langBtn()}
   </header>
-  ${S.role !== 'fan' ? `<div class="role-bar r-${S.role}">${roleBadge()}<span class="muted xs">${T('Demo role — switch any time from the top bar.', 'دور تجريبي — بدّل في أي وقت من الشريط العلوي.')}</span></div>` : ''}`;
+  ${S.role !== 'fan' ? `<div class="role-bar r-${S.role}">${roleBadge()}<span class="muted xs">${T('Demo role switch — not access control. A live system checks permissions on the server.', 'تبديل أدوار تجريبي — ليس نظام صلاحيات. النظام الفعلي يتحقق من الصلاحيات في الخادم.')}</span></div>` : ''}`;
+}
+function roleSheet() {
+  const desc = { fan: T('Plan the visit, explore, order and get help', 'خطط للزيارة، استكشف، اطلب واحصل على المساعدة'), operator: T('Event-day controls, orders, distribution, facilities', 'تحكم يوم الفعالية، الطلبات، التوزيع، المرافق'), vendor: T('Accept and prepare orders, stock, capacity', 'قبول وتحضير الطلبات، المخزون، السعة'), partner: T('Matchday campaigns and simulated results', 'حملات يوم المباراة ونتائج محاكاة'), admin: T('Event setup, services, integrations, business report', 'إعداد الفعالية، الخدمات، التكاملات، تقرير الأعمال') };
+  return `<h2 class="sheet-title">${T('Switch demo role', 'تبديل الدور التجريبي')}</h2>
+    <div class="notice warn">${icon('lock')}<span>${T('For reviewers only. Switching roles here is not access control — a production system must authenticate users and enforce each role on the server.', 'للمراجعين فقط. التبديل هنا ليس نظام صلاحيات — يجب أن يتحقق النظام الفعلي من هوية المستخدم ويفرض صلاحيات كل دور في الخادم.')}</span></div>
+    <div class="list mt-s">${ROLES().map(([k, l, ic]) => `<button class="choice ${S.role === k ? 'on' : ''}" data-act="setRole" data-arg="${k}" aria-pressed="${S.role === k}"><span class="choice-ic">${icon(ic)}</span><span class="grow"><b>${l}</b><small>${desc[k]}</small></span>${S.role === k ? icon('check') : ''}</button>`).join('')}</div>`;
 }
 function langBtn() {
   return `<button class="lang-btn" data-act="setLang" data-arg="${S.lang === 'ar' ? 'en' : 'ar'}" aria-label="${S.lang === 'ar' ? 'Switch to English' : 'التبديل إلى العربية'}" lang="${S.lang === 'ar' ? 'en' : 'ar'}">${icon('globe')}<span>${S.lang === 'ar' ? 'EN' : 'عربي'}</span></button>`;
@@ -134,16 +148,18 @@ const A = {
   closeSheet: () => closeSheet(),
   dismissCelebrate: () => dismissCelebrate(),
   confirmOk: () => { const cb = SHEET?.onOk; SHEET = null; renderSheet(); cb && cb(); },
-  setRole: (r) => { S.role = r; closeSheetSilently(); save(); go(ROLE_HOME[r]); toast(T(`Switched to ${{ fan: 'Fan', operator: 'Venue Operator', partner: 'Club / Partner' }[r]} mode`, `تم التبديل إلى وضع ${{ fan: 'المشجع', operator: 'مشغّل الملعب', partner: 'النادي / الشريك' }[r]}`)); },
+  setRole: (r) => { S.role = r; closeSheetSilently(); save(); go(ROLE_HOME[r]); toast(T(`Demo role: ${t('role.' + r)}`, `الدور التجريبي: ${t('role.' + r)}`)); },
+  roleSheet: () => openSheet(roleSheet, { label: T('Switch demo role', 'تبديل الدور التجريبي') }),
   roleGo: (a) => { const [r, p] = a.split(':'); S.role = r; closeSheetSilently(); save(); go(p || ROLE_HOME[r]); },
   setSection: (k) => { S.setup.section = k; S.setup.locationMode = 'manual'; S.cart.dest = null; commit(); toast(T(`Location set to Section ${k}`, `تم تحديد موقعك في القسم ${k}`), 'success'); },
   setLang: (l) => { S.lang = l; commit(); },
   quickDemo: () => {
-    S.user = { name: 'Sara', handle: 'sara@golbite.demo' };
+    S.user = { name: T('Sara', 'سارة'), handle: T('Demo visitor', 'زائر تجريبي'), demo: true };
     S.setup = { eventId: 'e1', teamId: 'hilal', section: 'B', row: 8, seat: 14, arrival: '19:00', gate: 'G2', locationMode: 'manual' };
     awardBadge('first');
     commit(); go('home');
   },
+  guestStart: () => { S.user = { name: T('Guest', 'زائر'), handle: T('Guest (demo)', 'زائر (تجريبي)'), guest: true }; SETUP = null; commit(); go('setup'); },
   signOut: () => confirmSheet({ title: T('Sign out?', 'تسجيل الخروج؟'), body: T('Your demo progress stays saved in this browser.', 'يبقى تقدمك محفوظاً في هذا المتصفح.'), ok: T('Sign out', 'خروج'), onOk: () => { S.user = null; SETUP = null; commit(); go('home'); } }),
 
   // setup
@@ -188,7 +204,8 @@ const A = {
   preorderHalftime: () => { S.cart.schedule = 'halftime'; save(); go('menu'); toast(T('Your order will be ready at halftime.', 'سيكون طلبك جاهزاً في الاستراحة.')); },
   redeemOffer: (id) => {
     const of = S.offers.find((o) => o.id === id);
-    if (!of) return;
+    if (!of || offerStatus(of) !== 'live') { toast(T('This offer is no longer available.', 'هذا العرض لم يعد متاحاً.'), 'warn'); return; }
+    if (!itemAvailable(of.item)) { toast(t('err.unavailable'), 'warn'); return; }
     of.m[S.match.phase].r++;
     of.s[S.setup.section] = (of.s[S.setup.section] || 0) + 1;
     const it = of.item || 'd2';
@@ -224,7 +241,7 @@ const A = {
   comboRemove: () => { S.cart.combo = Math.max(0, (S.cart.combo || 0) - 1); commit(); },
   menuCat: (c) => { S.menuCat = c; commit(); },
   menuDiet: (d) => { S.menuDiet = S.menuDiet.includes(d) ? S.menuDiet.filter((x) => x !== d) : [...S.menuDiet, d]; commit(); },
-  clearDiet: () => { S.menuDiet = []; commit(); },
+  clearDiet: () => { S.menuDiet = []; S.menuAvoid = []; MENUQ = ''; commit(); },
   toggleFav: (id) => { S.favorites = S.favorites.includes(id) ? S.favorites.filter((x) => x !== id) : [...S.favorites, id]; commit(); },
   itemInfo: (id) => { SHEETOPT = null; openSheet(() => itemInfoSheet(id), { label: L(item(id).name) }); },
   reorder: (id) => {
@@ -240,50 +257,73 @@ const A = {
     ensureCartDest();
     const items = cartItemsList();
     if (!items.length) { toast(T('Your order is empty.', 'طلبك فارغ.'), 'error'); return; }
+    const probs = checkoutProblems();
+    if (probs.length) { toast(probs[0], 'error'); rerender(); return; }
     const btn = document.querySelector('[data-act="placeOrder"]');
-    if (btn) { btn.disabled = true; btn.innerHTML = `${spinner()} ${T('Sending to kitchens…', 'جارٍ الإرسال للمطابخ…')}`; }
+    if (btn) { btn.disabled = true; btn.innerHTML = `${spinner()} ${T('Sending (demo)…', 'جارٍ الإرسال (تجريبي)…')}`; }
     setTimeout(() => {
-      const fee = S.cart.type === 'delivery' ? 5 : 0;
       const o = placeOrder({ items, type: S.cart.type, dest: S.cart.dest, schedule: S.cart.schedule, note: (S.cart.note || '').trim() });
-      o.total += fee;
       scheduleReadyAlert(o); haptic('success');
       S.cart = { type: S.cart.type, items: {}, dest: S.cart.dest, schedule: 'now', combo: 0, note: '' };
       save(); go('track/' + o.id);
-      celebrate({ emoji: '✅', title: T('Order confirmed!', 'تم تأكيد الطلب!'), sub: T(`${o.id} · routed to ${o.tasks.length} kitchen(s)`, `${o.id} · موزّع على ${o.tasks.length} مطبخ`), kind: 'confetti', ms: 2200 });
+      celebrate({ emoji: '✅', title: T('Demo order placed', 'تم إرسال الطلب التجريبي'), sub: T(`${o.id} · no payment was taken`, `${o.id} · لم يتم أي دفع`), kind: 'confetti', ms: 2200 });
     }, 700);
   },
 
   // tracking & help
-  collected: (id) => { const o = S.orders.find((x) => x.id === id); completeOrder(o); commit(); },
+  collected: (id) => { const o = S.orders.find((x) => x.id === id); if (o && setStage(o, 'collected', 'fan')) commit(); },
+  fanCancel: (id) => {
+    const o = S.orders.find((x) => x.id === id);
+    if (!o || !['placed', 'accepted'].includes(o.stage)) { toast(T('The kitchen has started — ask support to cancel.', 'بدأ المطبخ التحضير — اطلب الإلغاء من الدعم.'), 'warn'); return; }
+    confirmSheet({ title: T(`Cancel ${o.id}?`, `إلغاء ${o.id}؟`), body: T('The kitchen has not started yet. This is a demo, so no money is refunded.', 'لم يبدأ المطبخ بعد. هذا عرض تجريبي ولا يتم استرداد أي مبلغ.'), ok: t('act.cancel'), danger: true,
+      onOk: () => { cancelOrder(o, 'fan', T('Cancelled by fan', 'ألغاه المشجع')); Services.payments.refund(o.id, o.total); commit(); } });
+  },
   movePickup: (id) => {
     const o = S.orders.find((x) => x.id === id) || S.opsOrders.find((x) => x.id === id);
-    const alt = bestPickup(o.dest);
+    const alt = PICKUPS.filter((p) => p.id !== o.dest && pickupAllowed(p.id)).sort((a, b) => pickupWait(a.id) - pickupWait(b.id))[0];
+    if (!alt) { toast(T('No other pickup point is open.', 'لا توجد نقطة استلام أخرى مفتوحة.'), 'warn'); return; }
     o.dest = alt.id;
-    addAlert('route', { en: `${o.id} moved to ${alt.name.en}`, ar: `نقل ${o.id} إلى ${alt.name.ar}` });
-    toast(T(`Moved to ${L(alt.name)} — shorter wait.`, `تم النقل إلى ${L(alt.name)} — انتظار أقل.`), 'success');
+    logActivity(S.role === 'fan' ? 'fan' : 'operator', `${o.id} → ${L(alt.name)}`);
+    toast(T(`Moved to ${L(alt.name)}.`, `تم النقل إلى ${L(alt.name)}.`), 'success');
     commit();
   },
   orderHelp: (id) => openSheet(() => orderHelpSheet(id), { label: T('Order help', 'مساعدة الطلب') }),
+  supportStart: (kind) => { closeSheetSilently(); openSheet(() => supportSheet(kind), { label: L(SUPPORT_KINDS[kind].name) }); },
   helpResolve: (a) => {
     const [id, kind] = a.split(':');
     const o = S.orders.find((x) => x.id === id);
-    addAlert('help', { en: `Fan reported ${kind} on ${id}`, ar: `بلاغ من مشجع (${kind}) على ${id}` });
-    if (kind === 'delayed') { o.tasks.forEach((t) => (t.need = Math.max(1, t.need - 4))); addPoints(50, T('Sorry for the wait', 'نعتذر عن التأخير')); }
-    else {
-      const it = o.items[0];
-      placeOrderSilent({ items: [{ id: it.id, qty: 1, by: 'me' }], type: o.type === 'delivery' ? 'delivery' : 'pickup', dest: o.dest, priority: true });
-    }
+    if (kind === 'cancel') { closeSheetSilently(); return A.fanCancel(id); }
+    const res = resolveSupport(kind, o);
+    S.support.unshift({ id: uid('sr'), kind, orderId: id, at: Date.now(), minute: S.match.minute, status: res.status, outcome: res.outcome, next: res.next });
+    Services.support.submit(S.support[0]);
+    logActivity('fan', `${T('Support', 'دعم')} · ${L(SUPPORT_KINDS[kind].name)} · ${id}`);
     closeSheetSilently();
-    openSheet(() => `<div class="center"><div class="celeb-emoji">🤝</div><h2 class="sheet-title">${T('We are on it', 'نعمل على ذلك')}</h2><p class="muted">${kind === 'delayed' ? T('Your order has been prioritised and 50 points were added.', 'تمت أولوية طلبك وأضيفت 50 نقطة.') : T('A free replacement is being prepared with priority. No charge.', 'يتم تحضير بديل مجاني بأولوية. بدون تكلفة.')}</p><button class="btn btn-primary w-full" data-act="closeSheet">${T('OK', 'حسناً')}</button></div>`);
+    openSheet(() => `<div class="center"><div class="celeb-emoji">🤝</div><h2 class="sheet-title">${T('Request received (demo)', 'تم استلام الطلب (تجريبي)')}</h2><p>${esc(L(res.outcome))}</p><p class="muted small">${T('Next', 'التالي')}: ${esc(L(res.next))}</p><p class="muted xs">${t('demo.notReal')}</p><button class="btn btn-primary w-full" data-act="closeSheet">${T('OK', 'حسناً')}</button></div>`, { label: T('Support', 'الدعم') });
     commit();
   },
-  acceptAlt: (id) => {
+  recover: (a) => {
+    const [id, how] = a.split(':');
     const o = S.orders.find((x) => x.id === id);
-    const bad = o.issue.item, alt = ALTERNATIVES[bad];
-    o.items.forEach((i) => { if (i.id === bad) { i.id = alt; i.price = i.combo ? i.price : item(alt).price; } });
-    o.tasks = routeItems(o.items, destAngle(o));
+    if (!o || !o.issue) return;
+    if (how === 'cancel') { cancelOrder(o, 'fan', T('Cancelled after an item became unavailable', 'أُلغي بعد عدم توفر صنف')); o.issue = null; commit(); toast(T('Order cancelled. Demo only — no refund is processed.', 'تم إلغاء الطلب. تجريبي — لا يتم أي استرداد.'), 'info'); return; }
+    if (o.issue.kind === 'soldout') {
+      const bad = o.issue.item, alt = ALTERNATIVES[bad];
+      if (how === 'sub') { o.items.forEach((i) => { if (i.id === bad) { i.id = alt; if (!i.combo) i.price = item(alt).price; } }); o.tasks.forEach((tk) => tk.items.forEach((i) => { if (i.id === bad) i.id = alt; })); toast(T(`Swapped for ${L(item(alt).name)}.`, `تم الاستبدال بـ ${L(item(alt).name)}.`), 'success'); }
+      if (how === 'remove') { const line = o.items.find((i) => i.id === bad); o.items = o.items.filter((i) => i.id !== bad); o.tasks.forEach((tk) => (tk.items = tk.items.filter((i) => i.id !== bad))); o.tasks = o.tasks.filter((tk) => tk.items.length); o.refund = (o.refund || 0) + (line ? (line.price ?? linePrice(line.id, line.opt)) * line.qty : 0); toast(T('Item removed. Demo refund recorded — no money moves.', 'تم حذف الصنف. سُجل استرداد تجريبي — لا تتحرك أي أموال.'), 'success'); }
+      logActivity('fan', `${o.id}: ${how === 'sub' ? T('substitution accepted', 'قبول البديل') : T('item removed', 'حذف الصنف')}`);
+    } else if (o.issue.kind === 'rejected') {
+      const vid = o.issue.vid; const tk = o.tasks.find((x) => x.vid === vid);
+      if (how === 'reroute') {
+        const alt = VENDORS.find((x) => x.id !== vid && !vendorPaused(x.id) && tk.items.every((i) => x.cats.includes(item(i.id).cat)));
+        const ex = o.tasks.find((x) => x.vid === alt.id);
+        if (ex) { ex.items.push(...tk.items); o.tasks = o.tasks.filter((x) => x !== tk); } else Object.assign(tk, { vid: alt.id, rejected: false, acc: false, st: 0, prog: 0, reason: 'load' });
+        toast(T(`Sent to ${L(alt.name)}.`, `أُرسل إلى ${L(alt.name)}.`), 'success');
+      }
+      if (how === 'dropvendor') { o.refund = (o.refund || 0) + orderTotal(tk.items); o.items = o.items.filter((i) => !tk.items.some((x) => x.id === i.id)); o.tasks = o.tasks.filter((x) => x !== tk); toast(T('Items removed. Demo refund recorded — no money moves.', 'تم حذف الأصناف. سُجل استرداد تجريبي — لا تتحرك أي أموال.'), 'success'); }
+      logActivity('fan', `${o.id}: ${how === 'reroute' ? T('rerouted to another vendor', 'نُقل لبائع آخر') : T('vendor items removed', 'حذف أصناف البائع')}`);
+    }
     o.issue = null;
-    toast(T(`Swapped for ${L(item(alt).name)}.`, `تم الاستبدال بـ ${L(item(alt).name)}.`), 'success');
+    if (o.stage === 'placed' || o.stage === 'accepted' || o.stage === 'preparing') syncFromTasks(o, 'fan');
     commit();
   },
 
@@ -306,6 +346,7 @@ const A = {
   groupLeaderConfirm: () => A.groupPlace(),
   groupPlace: () => {
     const g = S.group;
+    if (!orderingStatus().open) { closeSheetSilently(); toast(orderingStatus().reason, 'error'); return; }
     const o = placeOrder({ items: g.items.map((i) => ({ ...i })), type: g.type, dest: g.dest, group: g.code });
     S.group = null; closeSheetSilently(); save(); go('track/' + o.id);
     scheduleReadyAlert(o); haptic('success');
@@ -380,59 +421,21 @@ const A = {
   setSpeed: (s) => { S.simSpeed = +s; startSim(); commit(); },
   startTour: () => { closeSheetSilently(); DEMO_OPEN = false; S.tour = 0; runTourStep(); },
   openDemo: () => { DEMO_OPEN = !DEMO_OPEN; renderDemo(); if (DEMO_OPEN) setTimeout(() => document.querySelector('.demo-panel button')?.focus(), 30); },
-  askResetEvent: () => confirmSheet({ title: T('Reset the event?', 'إعادة ضبط الحدث؟'), body: T('Match clock, crowds, closures and sold-out items go back to the start. Orders and rewards are kept.', 'تعود الساعة والكثافة والإغلاقات والأصناف النافدة للبداية. تبقى الطلبات والمكافآت.'), ok: T('Reset event', 'إعادة الحدث'), onOk: () => trigger('reset') }),
+  askResetEvent: () => confirmSheet({ title: T('Reset the event?', 'إعادة ضبط الحدث؟'), body: T('Clock, crowds, closures, stock, pauses, notices, tasks and the activity log go back to the sample state. Your orders and rewards are kept.', 'تعود الساعة والكثافة والإغلاقات والمخزون والإيقافات والإعلانات والمهام والسجل للحالة النموذجية. تبقى طلباتك ومكافآتك.'), ok: T('Reset event', 'إعادة الحدث'), onOk: () => trigger('reset') }),
   askResetAll: () => confirmSheet({ title: T('Reset all demo data?', 'مسح كل البيانات؟'), body: T('This permanently clears orders, points, badges, collectibles and preferences in this browser.', 'سيتم مسح الطلبات والنقاط والأوسمة والمقتنيات والتفضيلات نهائياً من هذا المتصفح.'), ok: T('Reset everything', 'مسح الكل'), danger: true, onOk: () => { resetState(); SETUP = null; dismissCelebrate(); DEMO_OPEN = false; MINI = { taps: 0, until: 0, done: false }; startSim(); go('home'); rerender(); toast(T('Demo data cleared.', 'تم مسح البيانات.'), 'success'); } }),
 
-  // ops
-  opsFilter: (a) => { const [k, v] = a.split(':'); OPS.filters = { status: 'all', vendor: 'all', section: 'all', pickup: 'all', urgency: 'all', [k]: v }; go('ops/orders'); },
-  opsClearFilters: () => { OPS.filters = { status: 'all', vendor: 'all', section: 'all', pickup: 'all', urgency: 'all' }; rerender(); },
-  opsOpen: (id) => {
-    OPS.sel = id;
-    if (window.innerWidth < 1280 || route().arg !== 'orders') openSheet(() => (findOpsOrder(id) ? opsDetail(findOpsOrder(id)) : ''), { live: true, label: id });
-    rerender();
-  },
-  opsDist: (id) => { OPS.dist = id; rerender(); },
-  opsStockCat: (c) => { OPS.stockCat = c; rerender(); },
-  opsStock: (a) => {
-    const [id, d] = a.split(':');
-    S.stock[id] = Math.max(0, (S.stock[id] || 0) + +d);
-    if (S.stock[id] > 0 && S.soldOut.includes(id)) S.soldOut = S.soldOut.filter((x) => x !== id);
-    if (S.stock[id] === 0 && !S.soldOut.includes(id)) S.soldOut.push(id);
-    commit();
-  },
-  opsAdvance: (id) => {
-    const o = findOpsOrder(id);
-    const st = Math.min(...o.tasks.map((t) => t.st));
-    if (st >= 3) return;
-    toast(`${o.id} · ${OPS_STATUS()[Math.min(3, st + 1)]}`, 'success', 1800);
-    if (st >= 2) { completeOrder(o); }
-    else { o.tasks.forEach((t) => { if (t.st === st) { t.st++; t.t = t.st === 1 ? 3 : 3 + t.need; } }); const prev = o.status; o.status = Math.min(...o.tasks.map((t) => t.st)) >= 2 ? 2 : 1; if (!o.synthetic && prev !== o.status) onOrderStatus(o); }
-    commit();
-  },
-  opsReroute: (a) => {
-    const [oid, vid] = a.split(':');
-    const o = findOpsOrder(oid);
-    const t = o.tasks.find((x) => x.vid === vid);
-    const cat = item(t.items[0].id).cat;
-    const alt = VENDORS.filter((v) => v.id !== vid && v.cats.includes(cat)).sort((a, b) => S.vendorLoad[a.id] - S.vendorLoad[b.id])[0];
-    if (!alt) { toast(T('No other vendor can make this item.', 'لا يوجد بائع آخر لهذا الصنف.'), 'warn'); return; }
-    const ex = o.tasks.find((x) => x.vid === alt.id);
-    if (ex) { ex.items.push(...t.items); o.tasks = o.tasks.filter((x) => x !== t); }
-    else { t.vid = alt.id; t.reason = 'load'; t.t = 0; t.st = 0; }
-    addAlert('route', { en: `${oid}: rerouted from ${vendor(vid).name.en} to ${alt.name.en}`, ar: `${oid}: إعادة توجيه إلى ${alt.name.ar}` });
-    toast(T(`Rerouted to ${L(alt.name)}`, `أعيد التوجيه إلى ${L(alt.name)}`), 'success');
-    commit();
-  },
-  opsUnavailable: (id) => trigger('soldout', id),
-  opsRunner: (id) => {
-    const o = findOpsOrder(id);
-    const busy = new Set(allOpsOrders().filter((x) => x.status < 3 && x.type === 'delivery').map((x) => x.runner));
-    o.runner = RUNNERS.find((r) => r !== o.runner && !busy.has(r)) || pick(RUNNERS.filter((r) => r !== o.runner));
-    addAlert('order', { en: `${id}: runner reassigned to ${o.runner}`, ar: `${id}: تعيين المندوب ${o.runner}` });
-    toast(T(`${id} reassigned to ${o.runner}`, `تم تعيين ${o.runner} للطلب ${id}`), 'success');
-    commit();
-  },
-  opsToggleStock: (id) => { if (S.soldOut.includes(id)) { S.soldOut = S.soldOut.filter((x) => x !== id); S.stock[id] = Math.max(S.stock[id] || 0, 40); toast(T('Restocked', 'تمت إعادة التوفير'), 'success'); commit(); } else trigger('soldout', id); },
+  // explore, guide & support
+  exploreCat: (c) => { EXPLORE.cat = c; EXPLORE.sel = null; rerender(); },
+  dirSelect: (id) => { EXPLORE.sel = id || null; rerender(); if (id && window.innerWidth < 900) document.querySelector('.map-side')?.scrollIntoView({ block: 'start' }); },
+  dirInfo: (id) => { if (route().name === 'explore') return A.dirSelect(id); openSheet(() => dirSheet(id), { live: true, label: T('Details', 'التفاصيل') }); },
+  exploreGo: (cat) => { EXPLORE = { q: '', cat, sel: null }; closeSheetSilently(); go('explore'); },
+  exploreItem: (id) => { EXPLORE = { q: '', cat: 'all', sel: id }; closeSheetSilently(); go('explore'); },
+  menuFor: (cat) => { S.menuCat = cat; MENUQ = ''; closeSheetSilently(); save(); go('menu'); },
+  clearCar: () => { S.savedCar = null; commit(); toast(T('Saved parking location deleted.', 'تم حذف موقع الموقف المحفوظ.')); },
+  clearSupport: () => { S.support = []; commit(); },
+  rateVisit: (n) => { S.feedback = { stars: +n, at: Date.now() }; logActivity('fan', T(`Visit rated ${n}/5`, `تقييم الزيارة ${n}/5`)); commit(); },
+  menuAvoid: (a) => { S.menuAvoid = (S.menuAvoid || []).includes(a) ? S.menuAvoid.filter((x) => x !== a) : [...(S.menuAvoid || []), a]; commit(); },
+  groupSplit: (m) => { S.group.split = m; commit(); },
 
   // partner
   draftImage: (e) => { draftOffer().image = e; rerender(); },
@@ -450,28 +453,24 @@ const A = {
   trigger: (a) => { const [k, v] = a.split(':'); trigger(k, v); },
 };
 
-function placeOrderSilent(opts) {
-  const id = 'GB-' + Math.floor(5000 + Math.random() * 4000);
-  const o = { id, items: opts.items, type: opts.type, dest: opts.dest, schedule: 'now', status: 0, created: Date.now(), handoff: 0, tasks: routeItems(opts.items, opts.type === 'delivery' ? SECTIONS[opts.dest].angle : pickup(opts.dest).angle), total: 0, runner: opts.type === 'delivery' ? pick(RUNNERS) : null, code: String(Math.floor(100 + Math.random() * 900)), eventId: currentEvent().id, replacement: true };
-  o.tasks.forEach((t) => (t.need = 1));
-  S.orders.unshift(o);
-}
-
 function closeSheetSilently() { SHEET = null; renderSheet(); }
 
 const INPUTS = {
   draftTitle: (v) => { draftOffer().title = v; refreshDraftPreview(); },
   draftDiscount: (v) => { draftOffer().discount = clamp(+v || 0, 0, 100); const o = document.getElementById('disc-out'); if (o) o.textContent = v + '%'; refreshDraftPreview(); },
   cartNote: (v) => { S.cart.note = v; save(); },
+  exploreQ: (v) => { EXPLORE.q = v; EXPLORE.sel = null; refreshLive(); },
+  menuQ: (v) => { MENUQ = v; const pos = document.activeElement?.selectionStart; rerender(); const el = document.querySelector('[data-input="menuQ"]'); if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch (e) {} } },
   draftMinute: (v) => (draftOffer().minute = clamp(+v || 1, 1, 90)),
+  draftLimit: (v) => (draftOffer().limit = Math.max(0, Math.round(+v || 0))),
   draftMinutes: (v) => { draftOffer().minutes = +v; const o = document.getElementById('minutes-out'); if (o) o.textContent = `${v} ${T('min', 'د')}`; },
 };
 const CHANGES = {
   setupRow: (v) => { setupDraft().row = +v; rerender(); },
+  prefSaveSeat: (v, el) => { S.prefs.saveSeat = el.checked; save(); },
   setupSeat: (v) => { setupDraft().seat = +v; rerender(); },
   draftSponsor: (v) => { draftOffer().sponsor = v; refreshDraftPreview(); },
   pickOpt: (v) => { SHEETOPT = v; renderSheet(); },
-  opsFilterSel: (v, el) => { OPS.filters[el.dataset.arg] = v; rerender(); },
   toggleVis: (v, el) => { S.visibility[el.dataset.arg] = el.checked; commit(); },
   toggleMotion: (v, el) => { S.reducedMotion = el.checked; commit(); },
   toggleClock: (v, el) => { S.match.clock = el.checked; commit(); },
@@ -480,9 +479,24 @@ const SUBMITS = {
   signin: (form) => {
     const v = form.handle.value.trim();
     if (!v) { document.getElementById('signin-error').hidden = false; form.handle.setAttribute('aria-invalid', 'true'); form.handle.focus(); return; }
-    const name = v.includes('@') ? v.split('@')[0] : /^\+?\d[\d\s]+$/.test(v) ? T('Fan', 'مشجع') : v;
-    S.user = { name: name.charAt(0).toUpperCase() + name.slice(1), handle: v };
+    S.user = { name: v, handle: T('Demo visitor', 'زائر تجريبي'), demo: true };
     commit(); go('setup');
+  },
+  saveCar: (form) => {
+    S.savedCar = { zone: form.zone.value, note: form.note.value.trim().slice(0, 40), at: Date.now() };
+    commit(); toast(T('Parking location saved on this device only.', 'تم حفظ موقع الموقف على هذا الجهاز فقط.'), 'success');
+  },
+  supportSubmit: (form) => {
+    const kind = form.kind.value;
+    const where = form.where?.value || null;
+    const res = resolveSupport(kind, null, where);
+    S.support.unshift({ id: uid('sr'), kind, where, need: form.need?.value || null, text: (form.text.value || '').trim().slice(0, 160), at: Date.now(), minute: S.match.minute, section: S.setup.section, status: res.status, outcome: res.outcome, next: res.next });
+    if (kind === 'facility' && where) S.tasks.unshift({ id: uid('tk'), kind: 'facility', where, by: 'fan', at: Date.now(), minute: S.match.minute, status: 'open', team: null, note: S.support[0].text });
+    if (kind === 'assist' || kind === 'lost') S.tasks.unshift({ id: uid('tk'), kind, where: 'sec-' + S.setup.section, by: 'fan', at: Date.now(), minute: S.match.minute, status: 'open', team: null, note: [S.support[0].need, S.support[0].text].filter(Boolean).join(' · ') });
+    Services.support.submit(S.support[0]);
+    logActivity('fan', `${T('Support', 'دعم')} · ${L(SUPPORT_KINDS[kind].name)}`);
+    closeSheetSilently(); commit();
+    toast(T('Request recorded (demo). Nobody is notified in this prototype.', 'تم تسجيل الطلب (تجريبي). لا يتم إشعار أحد في هذا النموذج.'), 'success', 4500);
   },
   groupJoin: (form) => {
     const code = (form.code.value || '').trim().toUpperCase();
@@ -495,9 +509,11 @@ const SUBMITS = {
     const d = draftOffer();
     if (!validateDraft(d)) { rerender(); document.querySelector('[aria-invalid="true"]')?.focus(); return; }
     if (d.step < 3) { d.step++; rerender(); return; }
-    const of = seedOfferStats({ id: uid('of'), title: { en: d.title, ar: d.title }, sponsor: d.sponsor, image: d.image, moment: d.moment, minute: +d.minute, sections: [...d.sections], minutes: d.minutes,
-      discount: d.reward === 'free' ? 100 : +d.discount, item: IMAGE_ITEM[d.image] || 'd2', active: true, tone: d.tone, endsAt: d.moment === 'now' ? Date.now() + d.minutes * 60000 : null });
-    S.offers.unshift(of);
+    const fields = { title: { en: d.title, ar: d.title }, sponsor: d.sponsor, image: d.image, moment: d.moment, minute: +d.minute, sections: [...d.sections], minutes: d.minutes,
+      discount: d.reward === 'free' ? 100 : +d.discount, item: d.items[0], items: [...d.items], limit: +d.limit || 0, active: true, tone: d.tone, endsAt: d.moment === 'now' ? Date.now() + d.minutes * 60000 : null };
+    let of;
+    if (d.editing) { of = S.offers.find((x) => x.id === d.editing); Object.assign(of, fields); if (of.status === 'ended' || !of.status) of.status = 'scheduled'; logActivity('partner', `${d.title}: ${T('edited', 'عُدّل')}`); }
+    else { of = seedOfferStats({ id: uid('of'), status: 'scheduled', ...fields }); S.offers.unshift(of); logActivity('partner', `${d.title}: ${T('scheduled', 'مجدول')}`); }
     DRAFT = null;
     save(); go('partner/results');
     setTimeout(() => openSheet(() => `<div class="center"><div class="celeb-mark">${sunMark(56, 'burst')}<span class="celeb-emoji">📣</span></div><h2 class="sheet-title">${T('Offer scheduled', 'تمت جدولة العرض')}</h2>
@@ -506,6 +522,9 @@ const SUBMITS = {
       <div class="row gap mt wrap"><button class="btn btn-primary grow" data-act="roleGo" data-arg="fan:home">${T('Preview as fan', 'معاينة كمشجع')}</button>${!offerLive(of) ? `<button class="btn btn-ghost grow" data-act="triggerOfferMoment" data-arg="${of.moment}">${T('Simulate moment', 'محاكاة اللحظة')}</button>` : ''}</div>`, { live: true, label: T('Offer scheduled', 'تمت جدولة العرض') }), 60);
   },
 };
+Object.assign(A, OPS_ACTIONS, VENDOR_ACTIONS, ADMIN_ACTIONS, PARTNER_ACTIONS);
+Object.assign(CHANGES, OPS_CHANGES, VENDOR_CHANGES, ADMIN_CHANGES, PARTNER_CHANGES);
+Object.assign(SUBMITS, OPS_SUBMITS, ADMIN_SUBMITS);
 function refreshDraftPreview() {
   const pv = document.getElementById('offer-preview');
   if (pv) pv.innerHTML = offerCard(previewOfferObj(draftOffer()), true);
@@ -521,36 +540,92 @@ A.triggerOfferMoment = (m) => {
 
 /* ---------- Demo Controls ---------- */
 let DEMO_OPEN = false;
+const SCENARIOS = () => [
+  ['prematch', '🕖', T('Pre-match', 'قبل المباراة')],
+  ['busy', '🚶', T('Busy pickup', 'ازدحام الاستلام')],
+  ['vendorpause', '⏸️', T('Vendor pause', 'إيقاف بائع')],
+  ['goaloffer', '⚽', T('Goal offer', 'عرض الهدف')],
+  ['halftime', '⏱️', T('Halftime rush', 'ذروة الاستراحة')],
+  ['delayed', '🐢', T('Delayed order', 'طلب متأخر')],
+  ['reject', '🙅', T('Vendor rejects', 'رفض البائع')],
+  ['unavailable', '📦', T('Item unavailable', 'صنف غير متاح')],
+  ['facility', '🚻', T('Facility unavailable', 'مرفق غير متاح')],
+];
+function demoOrder() {
+  let o = activeOrder();
+  if (o && !o.issue) return o;
+  const items = [{ id: 'b1', qty: 1, by: 'me' }, { id: 'f2', qty: 1, by: 'me' }, { id: 'd4', qty: 1, by: 'me' }].filter((i) => itemAvailable(i.id));
+  o = placeOrder({ items: items.length ? items : [{ id: 'd1', qty: 1, by: 'me' }], type: 'pickup', dest: PICKUPS.find((p) => pickupAllowed(p.id))?.id || 'P1' });
+  return o;
+}
+function runScenario(k) {
+  S.demo.scenario = k;
+  logActivity('sim', `${T('Scenario', 'سيناريو')}: ${SCENARIOS().find(([x]) => x === k)[2]}`);
+  switch (k) {
+    case 'prematch':
+      S.ops = defaultOpsState(); S.overloaded = []; S.closedRoutes = []; S.svcStatus = {};
+      trigger('phase', 'prematch'); return;
+    case 'busy': { const p = S.setup ? nearestPickup().id : 'P1'; if (!S.overloaded.includes(p)) trigger('overload', p); trigger('crowd', 'up'); return; }
+    case 'vendorpause':
+      if (!vendorPaused('v1')) S.ops.pausedVendors.push('v1');
+      logActivity('vendor', `${L(vendor('v1').name)} ${T('paused', 'متوقف')}`);
+      toast(T(`${L(vendor('v1').name)} paused new orders (simulated).`, `${L(vendor('v1').name)} أوقف الطلبات الجديدة (محاكاة).`), 'warn', 4500);
+      break;
+    case 'goaloffer': trigger('goal'); return;
+    case 'halftime':
+      trigger('halftime');
+      for (let i = 0; i < 5; i++) S.opsOrders.push(makeOpsOrder());
+      break;
+    case 'delayed': { const o = demoOrder(); o.delay = 10; logActivity('vendor', `${o.id}: ${T('kitchen reported a delay', 'المطبخ أبلغ عن تأخير')}`); save(); checkEtaChange(o); go('track/' + o.id); break; }
+    case 'reject': { const o = demoOrder(); const tk = o.tasks.find((x) => x.st < 2) || o.tasks[0]; vendorAction(o, tk.vid, 'reject', 'vendor'); go('track/' + o.id); break; }
+    case 'unavailable': { const o = demoOrder(); S.role = 'fan'; go('track/' + o.id); trigger('soldout', o.items[0].id); return; }
+    case 'facility':
+      S.svcStatus.wc1 = 'unavailable';
+      S.tasks.unshift({ id: uid('tk'), kind: 'service', where: 'wc1', by: 'sim', at: Date.now(), minute: S.match.minute, status: 'open', team: null, note: T('Water supply issue (simulated)', 'مشكلة في المياه (محاكاة)') });
+      toast(T('Restrooms · North-West marked unavailable (simulated).', 'دورات مياه الشمال الغربي غير متاحة (محاكاة).'), 'warn', 4500);
+      break;
+  }
+  commit();
+}
+function advanceDemoOrders() {
+  let n = 0;
+  allOpsOrders().forEach((o) => { if (!isFinal(o) && !o.issue && advanceOrder(o, 'sim')) n++; });
+  toast(T(`${n} order(s) moved one step (simulated).`, `تم تقديم ${n} طلب خطوة واحدة (محاكاة).`), 'info');
+  commit();
+}
 function renderDemo() {
   const root = document.getElementById('demo-root');
   if (!DEMO_OPEN || !S.user || !S.setup) { root.innerHTML = ''; return; }
   const c = isConcert();
-  const btn = (act, arg, emoji, label) => `<button class="demo-btn" data-act="${act}" data-arg="${arg}"><span>${emoji}</span>${label}</button>`;
+  const btn = (act, arg, emoji, label, on) => `<button class="demo-btn ${on ? 'on' : ''}" data-act="${act}" data-arg="${arg}"><span>${emoji}</span>${label}</button>`;
   root.innerHTML = `<div class="demo-panel" role="dialog" aria-label="${T('Demo controls', 'أدوات العرض')}">
     <div class="row between"><b>${icon('flask')} ${T('Demo Controls', 'أدوات العرض')}</b><button class="icon-btn sm" data-act="openDemo" aria-label="${T('Close', 'إغلاق')}">${icon('x')}</button></div>
-    <small class="muted">${phaseLabel()} · ${S.match.minute}' · ${S.match.home}-${S.match.away}</small>
+    <small class="muted">${S.ops.cancelled ? t('ev.cancelled') : phaseLabel()} · ${S.match.minute}' · ${S.match.home}-${S.match.away} · ${T('everything here is simulated', 'كل ما هنا محاكاة')}</small>
+    <h3 class="demo-h">${T('Scenarios', 'السيناريوهات')}</h3>
+    <div class="demo-grid">${SCENARIOS().map(([k, e, l]) => btn('scenario', k, e, l, S.demo.scenario === k)).join('')}</div>
+    <h3 class="demo-h">${T('Clock & orders', 'الوقت والطلبات')}</h3>
     <div class="demo-grid">
-      ${btn('trigger', 'advance', '⏭️', T('Advance timeline', 'تقديم المخطط'))}
+      ${btn('trigger', 'advance', '⏭️', T('Advance clock', 'تقديم الوقت'))}
       ${btn('trigger', 'goal', c ? '🎤' : '⚽', c ? T('Hit song', 'أغنية مميزة') : T('Home goal', 'هدف للمضيف'))}
       ${c ? '' : btn('trigger', 'goal:away', '🥅', T('Away goal', 'هدف للضيف'))}
-      ${btn('trigger', 'halftime', '⏱️', c ? T('Intermission', 'الاستراحة') : T('Halftime', 'الاستراحة'))}
-      ${btn('trigger', 'redcard', '🟥', c ? T('Surprise guest', 'ضيف مفاجئ') : T('Red card', 'بطاقة حمراء'))}
-      ${btn('trigger', 'win', '🏆', c ? T('Encore finale', 'الختام') : T('Home win', 'فوز المضيف'))}
-      ${btn('trigger', 'drop77', '🔥', T("77' merch drop", 'إصدار الدقيقة 77'))}
-      ${btn('trigger', 'crowd:up', '📈', T('Crowd surge', 'ارتفاع الكثافة'))}
-      ${btn('trigger', 'crowd:down', '📉', T('Crowd eases', 'انخفاض الكثافة'))}
+      ${btn('trigger', 'final', '🏁', T('Full time', 'نهاية المباراة'))}
+      ${btn('advanceOrders', '', '➡️', T('Advance orders', 'تقديم الطلبات'))}
+      ${btn('toggleAutopilot', '', S.demo.autopilot ? '🤖' : '✋', S.demo.autopilot ? T('Autopilot on', 'تشغيل تلقائي') : T('Autopilot off', 'تشغيل يدوي'), S.demo.autopilot)}
       ${btn('trigger', 'closure', '🚧', S.closedRoutes.length ? T('Reopen route', 'فتح الممر') : T('Route closure', 'إغلاق ممر'))}
-      ${btn('trigger', 'overload', '⚠️', T('Overload pickup', 'ازدحام الاستلام'))}
-      ${btn('trigger', 'soldout', '📦', T('Item sold out', 'نفاد صنف'))}
-      ${btn('roleGo', 'operator:ops/orders', '🧾', T('Operator queue', 'طابور المشغّل'))}
-      ${btn('askResetEvent', '', '🔄', T('Event reset', 'إعادة الحدث'))}
+      ${btn('trigger', 'drop77', '🔥', T("77' merch drop", 'إصدار الدقيقة 77'))}
       ${btn('startTour', '', '✨', T('Product tour', 'جولة المنتج'))}
     </div>
-    <div class="row gap wrap mt-s">${EVENTS.map((e) => `<button class="chip ${currentEvent().id === e.id ? 'on' : ''}" data-act="switchEvent" data-arg="${e.id}">${e.type === 'concert' ? '🎤' : '⚽'} ${L(e.title)}</button>`).join('')}</div>
-    <div class="row gap wrap mt-s"><span class="muted small">${T('Speed', 'السرعة')}</span>${[0.5, 1, 2, 4].map((s) => `<button class="chip ${S.simSpeed === s ? 'on' : ''}" data-act="setSpeed" data-arg="${s}">${s}×</button>`).join('')}
-      <button class="chip ${S.theme === 'team' ? 'on' : ''}" data-act="setTheme" data-arg="${S.theme === 'team' ? 'brand' : 'team'}">🎨 ${T('Team colours', 'ألوان الفريق')}</button></div>
+    <h3 class="demo-h">${T('Demo role', 'الدور التجريبي')}</h3>
+    <div class="row gap-xs wrap">${ROLES().map(([k, l]) => `<button class="chip sm ${S.role === k ? 'on' : ''}" data-act="setRole" data-arg="${k}">${l}</button>`).join('')}</div>
+    <small class="muted xs">${T('Not access control — production checks roles on the server.', 'ليس نظام صلاحيات — النظام الفعلي يتحقق من الأدوار في الخادم.')}</small>
+    <div class="row gap wrap mt-s">${EVENTS.map((e) => `<button class="chip sm ${currentEvent().id === e.id ? 'on' : ''}" data-act="switchEvent" data-arg="${e.id}">${e.type === 'concert' ? '🎤' : '⚽'} ${L(e.title)}</button>`).join('')}</div>
+    <div class="row gap wrap mt-s"><span class="muted small">${T('Speed', 'السرعة')}</span>${[0.5, 1, 2, 4].map((sp) => `<button class="chip sm ${S.simSpeed === sp ? 'on' : ''}" data-act="setSpeed" data-arg="${sp}">${sp}×</button>`).join('')}</div>
+    <div class="row gap wrap mt-s"><button class="btn btn-ghost btn-sm" data-act="askResetEvent">${icon('refresh')} ${T('Reset event', 'إعادة الحدث')}</button><button class="btn btn-danger btn-sm" data-act="askResetAll">${T('Reset all demo data', 'مسح كل البيانات')}</button></div>
   </div>`;
 }
+A.scenario = (k) => runScenario(k);
+A.advanceOrders = () => advanceDemoOrders();
+A.toggleAutopilot = () => { S.demo.autopilot = !S.demo.autopilot; logActivity('sim', S.demo.autopilot ? T('Autopilot on', 'التشغيل التلقائي مفعل') : T('Autopilot off', 'التشغيل التلقائي متوقف')); commit(); };
 
 /* ---------- Product Tour ---------- */
 const TOUR = [
@@ -625,7 +700,11 @@ window.addEventListener('hashchange', () => {
   // a link into another role's workspace switches the role
   if (route().name === 'ops' && S.role !== 'operator') S.role = 'operator';
   if (route().name === 'partner' && S.role !== 'partner') S.role = 'partner';
+  if (route().name === 'vendor' && S.role !== 'vendor') S.role = 'vendor';
+  if (route().name === 'admin' && S.role !== 'admin') S.role = 'admin';
+  if (FAN_ROUTES.includes(route().name) && S.role !== 'fan') S.role = 'fan';
   rerender(); document.getElementById('main')?.focus({ preventScroll: true }); });
+const FAN_ROUTES = ['home', 'explore', 'guide', 'menu', 'summary', 'track', 'orders', 'group', 'play', 'shop', 'profile', 'support'];
 window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change', rerender);
 
 /* ---------- boot ---------- */
